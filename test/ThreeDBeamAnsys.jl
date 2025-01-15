@@ -1,35 +1,94 @@
 using BeamROM, LinearAlgebra
 
-# Shell element static linear analysis with Hyperworks for a aluminum beam with rectangular cross-sectional dimensions 60 x 2.25 mm
+# 3D solid element static linear analysis with Ansys for a steel beam with rectangular cross-sectional dimensions 50 x 2 mm
+
+# Mesh ID (#1 = 100 x 11 x 5 elements, 
+           #2 = 100 x 11 x 20 elements,
+           #3 = 500 x 21 x 1 elements,
+           #4 = 500 x 11 x 3 elements,
+           #5 = 300 x 21 x 4 elements)
+mesh = 5
 
 # Beam length [m]
-L = 0.55
+L = 1
 
-# Displacements due to loads [m]
-u_F1 = [6.793575012125e-8; 0; 0]
-u_F2 = [0; 1.92349e-5; 0]
-u_F3 = [0; 0; 1.340157165527e-2]
-u_M1 = [0; 0; 0]
-u_M2 = [0; 0; -3.675753173828e-2]
-u_M3 = [0; 5.3601e-5; 0]
-
-# Rotation angles due to loads
-θ_F1 = [0; 0; 0]
-θ_F2 = [0; 0; 5.3601e-5]
-θ_F3 = [0; -3.675753176212e-2; 0]
-θ_M1 = [1.01065325737e-1; 0; 0]
-θ_M2 = [0; 1.469180583954e-1; 0]
-θ_M3 = [0; 0; 6.24e-3]
-
-# Substitute by values that yield correct diagonal and close-to-zero off-diagonal
-# u_F2 = [0; 1.927996e-5; 0]
-# u_F3 = [0; 0; 1.3581127e-2]
-# u_M2 = [0; 0; -3.7038942e-2]
-# u_M3 = [0; 5.208602e-5; 0]
-# θ_F2 = [0; 0; 5.208602e-5]
-# θ_F3 = [0; -3.7038942e-2; 0]
-# θ_M2 = [0; 1.3468706e-1; 0]
-# θ_M3 = [0; 0; 1.89404e-4]
+# Generalized displacements
+if mesh == 1
+    # Displacements due to loads [m]
+    u_F1 = [4.996605441e-8; 0; 0]
+    u_F2 = [0; 8.007171709e-5; 0]
+    u_F3 = [0; 0; 4.971051216e-2]
+    u_M1 = [0; 0; -1.593801813e-7]
+    u_M2 = [0; 0; -7.470346987e-2]
+    u_M3 = [0; 1.199342369e-4; 0]
+    # Rotation angles due to loads
+    θ_F1 = [0; 0; 0]
+    θ_F2 = [0; 0; 1.19919222e-4]
+    θ_F3 = [0; -7.470055568e-2; 0]
+    θ_M1 = [9.901712621e-2; 5.619892049e-7; 0]
+    θ_M2 = [0; 1.496850956e-1; 0]
+    θ_M3 = [0; 0; 2.39917619e-4]
+elseif mesh == 2
+    # Displacements due to loads [m]
+    u_F1 = [4.996631731e-8; 0; 0]
+    u_F2 = [0; 8.007217548e-5; 0]
+    u_F3 = [0; 0; 5.01895334e-2]
+    u_M1 = [0; 0; -1.304690541e-6]
+    u_M2 = [0; 0; -7.535602897e-2]
+    u_M3 = [0; 1.199346079e-4; 0]
+    # Rotation angles due to loads
+    θ_F1 = [0; 0; 0]
+    θ_F2 = [0; 0; 1.19919554e-4]
+    θ_F3 = [0; -7.536025755e-2; 0]
+    θ_M1 = [9.901712621e-2; 4.571992e-6; 0]
+    θ_M2 = [0; 1.505837705e-1; 0]
+    θ_M3 = [0; 0; 2.39917829e-4]
+elseif mesh == 3
+    # Displacements due to loads [m]
+    u_F1 = [4.996639902e-8; 0; 0]
+    u_F2 = [0; 8.007464203e-5; 0]
+    u_F3 = [0; 0; 4.972618818e-2]
+    u_M1 = [0; 0; -7.921334675e-9]
+    u_M2 = [0; 0; -7.47295171e-2]
+    u_M3 = [0; 1.199371181e-4; 0]
+    # Rotation angles due to loads
+    θ_F1 = [0; 0; 0]
+    θ_F2 = [0; 0; 1.19921981e-4]
+    θ_F3 = [0; -7.47248614e-2; 0]
+    θ_M1 = [9.880821027e-2; 3.281869712e-8; 0]
+    θ_M2 = [0; 1.510321878e-1; 0]
+    θ_M3 = [0; 0; 2.39920432e-4]
+elseif mesh == 4
+    # Displacements due to loads [m]
+    u_F1 = [4.99661929e-8; 0; 0]
+    u_F2 = [0; 8.007527504e-5; 0]
+    u_F3 = [0; 0; 4.973853007e-2]
+    u_M1 = [0; 0; -1.54161666e-9]
+    u_M2 = [0; 0; -7.474260777e-2]
+    u_M3 = [0; 1.199376784e-4; 0]
+    # Rotation angles due to loads
+    θ_F1 = [0; 0; 0]
+    θ_F2 = [0; 0; 1.19922644e-4]
+    θ_F3 = [0; -7.473776274e-2; 0]
+    θ_M1 = [9.900177083e-2; -8.850138709e-9; 0]
+    θ_M2 = [0; 1.498418948e-1; 0]
+    θ_M3 = [0; 0; 2.39920994e-4] 
+elseif mesh == 5
+    # Displacements due to loads [m]
+    u_F1 = [4.996669389e-8; 0; 0]
+    u_F2 = [0; 8.007566794e-5; 0]
+    u_F3 = [0; 0; 4.97346893e-2]
+    u_M1 = [0; 0; 2.900074614e-9]
+    u_M2 = [0; 0; -7.473774254e-2]
+    u_M3 = [0; 1.199380349e-4; 0]
+    # Rotation angles due to loads
+    θ_F1 = [0; 0; 0]
+    θ_F2 = [0; 0; 1.19923018e-4]
+    θ_F3 = [0; -7.473242382e-2; 0]
+    θ_M1 = [9.9027601e-2; -1.205875228e-8; 0]
+    θ_M2 = [0; 1.497338681e-1; 0]
+    θ_M3 = [0; 0; 2.39921297e-4]        
+end
 
 # Compute stiffness matrix
 S = stiffness_matrix(L=L,u_F1=u_F1,u_F2=u_F2,u_F3=u_F3,u_M1=u_M1,u_M2=u_M2,u_M3=u_M3,θ_F1=θ_F1,θ_F2=θ_F2,θ_F3=θ_F3,θ_M1=θ_M1,θ_M2=θ_M2,θ_M3=θ_M3)
@@ -44,17 +103,17 @@ J,S11_uF1,S11_θF1,S11_uF2,S11_θF2,S11_uF3,S11_θF3,S11_uM1,S11_θM1,S11_uM2,S1
 # Comparison with expected stiffness matrix
 # ------------------------------------------------------------------------------
 # Beam properties
-b = 60e-3
-h = 2.25e-3
-E = 71.7e9
-G = 26.9e9
+b = 50e-3
+h = 2e-3
+E = 200e9
+G = 76.92e9
 
 # Derived geometric properties. Note: shear and torsional correction factors estimates based on http://dx.doi.org/10.17515/resm2015.19me0827 (or https://www.researchgate.net/publication/283665997_Shear_and_torsion_correction_factors_of_Timoshenko_beam_model_for_generic_cross_sections) for a rectangular cross-section with aspect ratio 50/2 = 25
 A = b*h
 Iy = b*h^3/12
 Iz = h*b^3/12
 J = Iy+Iz
-Kt = 6e-3
+Kt = 6.5e-3
 Ksy = Ksz = 5/6
 
 # Expected stiffness matrix

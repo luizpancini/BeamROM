@@ -13,7 +13,7 @@ u_M1 = [0; 0; 0]
 u_M2 = [0; 0; -7.499998808e-2]
 u_M3 = [0; 1.19999997e-4; 0]
 
-# Rodrigues parameters (may be taken as approximately equal to the angles of rotation themselves, if small) due to loads
+# Rotation angles due to loads
 θ_F1 = [0; 0; 0]
 θ_F2 = [0; 0; 1.2e-4]
 θ_F3 = [0; -7.499998549e-2; 0]
