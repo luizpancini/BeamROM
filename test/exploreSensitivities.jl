@@ -132,6 +132,7 @@ p2 = plot(valueRange, J_norm_values,
           xlabel=label_x,
           ylabel="∂$(stiffnessEntry)/∂$(label_x) $(label_x)/$(stiffnessEntry) ")
 
+# Absolute Jacobian (∂S/∂u)
 p3 = plot(valueRange, J_abs_values, 
           label="Absolute Jacobian", 
           color=:orange, 
@@ -139,4 +140,5 @@ p3 = plot(valueRange, J_abs_values,
           xlabel=label_x,
           ylabel="∂$(stiffnessEntry)/∂$(label_x)")
 
+# Subplots
 plot(p1, p2, p3, layout=(3, 1), size=(900, 900), margin=5Plots.mm)
