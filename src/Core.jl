@@ -39,7 +39,7 @@ function stiffness_matrix(; F1=1,F2=1,F3=1,M1=1,M2=1,M3=1,L,u_F1,u_F2,u_F3,u_M1,
     B[:,6] .= vcat(u_M3,θ_M3)
 
     # Generalized displacement-forces matrix
-    D = B * inv(F)
+    D = B/F
 
     # Extract submatrices from D
     D11 = D[1:3, 1:3]
@@ -56,7 +56,7 @@ function stiffness_matrix(; F1=1,F2=1,F3=1,M1=1,M2=1,M3=1,L,u_F1,u_F2,u_F3,u_M1,
 
     # Construct compliance matrix from R, Z, and T
     C = [R Z; Z' T]
-    
+        
     # Invert compliance matrix to find stiffness matrix
     S = inv(C)
     
@@ -171,6 +171,59 @@ function stiffness_matrix_derivatives(; F1=1,F2=1,F3=1,M1=1,M2=1,M3=1,L,u_F1,u_F
 end
 export stiffness_matrix_derivatives
 
+
+"""
+    stiffness_matrix_normalized_derivatives(; kwargs...)
+
+Computes the normalized Jacobian matrix of the sectional stiffness matrix with respect to the generalized displacements resulting from the loads
+
+# Keyword arguments
+- `F1=1` = force in load case of force in x1-direction
+- `F2=1` = force in load case of force in x2-direction
+- `F3=1` = force in load case of force in x3-direction
+- `M1=1` = moment in load case of moment in x1-direction
+- `M2=1` = moment in load case of moment in x2-direction
+- `M3=1` = moment in load case of moment in x3-direction
+- `L` = length of the beam
+- `u_F1` = displacements in load case of force in x1-direction
+- `u_F2` = displacements in load case of force in x2-direction
+- `u_F3` = displacements in load case of force in x3-direction
+- `u_M1` = displacements in load case of moment in x1-direction
+- `u_M2` = displacements in load case of moment in x2-direction
+- `u_M3` = displacements in load case of moment in x3-direction
+- `θ_F1` = rotation in load case of force in x1-direction
+- `θ_F2` = rotation in load case of force in x2-direction
+- `θ_F3` = rotation in load case of force in x3-direction
+- `θ_M1` = rotation in load case of moment in x1-direction
+- `θ_M2` = rotation in load case of moment in x2-direction
+- `θ_M3` = rotation in load case of moment in x3-direction
+"""
+function stiffness_matrix_normalized_derivatives(; F1=1,F2=1,F3=1,M1=1,M2=1,M3=1,L,u_F1,u_F2,u_F3,u_M1,u_M2,u_M3,θ_F1,θ_F2,θ_F3,θ_M1,θ_M2,θ_M3)
+
+    # Array of generalized displacements
+    genDisp = vcat(u_F1,θ_F1,u_F2,θ_F2,u_F3,θ_F3,u_M1,θ_M1,u_M2,θ_M2,u_M3,θ_M3)
+
+    # Jacobian matrix
+    J = ForwardDiff.jacobian(x -> stiffness_matrix_wrapper(x,F1,F2,F3,M1,M2,M3,L), genDisp)
+
+    # Stiffness
+    S_vec = stiffness_matrix_wrapper(genDisp, F1, F2, F3, M1, M2, M3, L)
+
+    # Normalization
+    J_norm = zeros(eltype(J), size(J))
+    for i in 1:size(J, 1)
+        for j in 1:size(J, 2)
+            if S_vec[i] != 0.0
+                J_norm[i, j] = J[i, j] * genDisp[j] / S_vec[i]
+            else
+                J_norm[i, j] = 0.0
+            end
+        end
+    end
+
+    return J_norm, J
+end
+export stiffness_matrix_normalized_derivatives
 
 """
     displacements_from_loads(; kwargs...)

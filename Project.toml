@@ -1,14 +1,16 @@
 name = "BeamROM"
 uuid = "46bbd6b3-784a-4a3c-b130-9b6047190a1e"
-authors = ["luizpancini <luizpancini@usp.br>"]
 version = "0.1.0"
+authors = ["luizpancini <luizpancini@usp.br>"]
 
 [deps]
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 
 [compat]
 ForwardDiff = "0.10.38"
 LinearAlgebra = "1.11.0"
+Plots = "1.41.6"
 Revise = "3.6.4"

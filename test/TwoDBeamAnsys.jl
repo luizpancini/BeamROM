@@ -2,8 +2,6 @@ using BeamROM, LinearAlgebra
 
 # 2D shell element static linear analysis with Ansys for a steel beam with rectangular cross-sectional dimensions 50 x 2 mm
 
-# Note: increasing θ_M2[2] and θ_M3[3] are the surest ways to get positive GA2 and GA3
-
 # Mesh ID (#1 = 2.5 mm elements, #2 = 10 mm elements)
 mesh = 1
 

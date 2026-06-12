@@ -1,6 +1,6 @@
 module BeamROM
 
-using LinearAlgebra, ForwardDiff, Revise
+using LinearAlgebra, ForwardDiff, Revise, Plots
 
 include("Core.jl")
 include("Utilities.jl")
