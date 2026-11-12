@@ -1,0 +1,14 @@
+{
+  "model": "S10_baseline.bdf",
+  "load_node": 200713,
+  "L": 0.5551641915162935,
+  "y_root": 0.0,
+  "y_end": 0.54673,
+  "x_axis": 0.04246854668361196,
+  "n_root_nodes": 1,
+  "n_tip_nodes": 58,
+  "rod_center": 1212,
+  "spar_pid": 100003,
+  "rod_pid": 13,
+  "sweep": 10.0
+}

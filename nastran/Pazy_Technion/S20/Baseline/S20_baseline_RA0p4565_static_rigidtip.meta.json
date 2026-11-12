@@ -1,0 +1,14 @@
+{
+  "model": "S20_baseline.bdf",
+  "load_node": 200713,
+  "L": 0.5551602603452338,
+  "y_root": 0.0,
+  "y_end": 0.52168,
+  "x_axis": 0.04323496734685371,
+  "n_root_nodes": 1,
+  "n_tip_nodes": 58,
+  "rod_center": 1211,
+  "spar_pid": 100003,
+  "rod_pid": 13,
+  "sweep": 20.0
+}

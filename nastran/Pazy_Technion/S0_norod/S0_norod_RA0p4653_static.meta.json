@@ -1,0 +1,14 @@
+{
+  "model": "S0_norod.bdf",
+  "load_node": 200713,
+  "L": 0.5498437,
+  "y_root": 0.00215,
+  "y_end": 0.5519937,
+  "x_axis": 0.045995091120000005,
+  "n_root_nodes": 59,
+  "n_tip_nodes": 58,
+  "rod_center": null,
+  "spar_pid": 100003,
+  "rod_pid": null,
+  "sweep": 0.0
+}
