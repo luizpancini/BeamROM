@@ -1,6 +1,6 @@
 name = "BeamROM"
 uuid = "46bbd6b3-784a-4a3c-b130-9b6047190a1e"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["luizpancini <luizpancini@usp.br>"]
 
 [deps]
