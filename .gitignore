@@ -1,11 +1,9 @@
 .venv/
 __pycache__/
-*.op2
 *.f06
 *.pch
 *.f04
 *.log
 *.MASTER
 *.DBALL
-*.csv
 .DS_Store
