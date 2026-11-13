@@ -8,10 +8,10 @@ include(joinpath(pkgdir(BeamROM), "nastran", "workflow.jl"))
 # Optimization method -- choose one of :ABC (Artificial Bee Colony), :DE (Differential Evolution), :ECA (Evolutionary Centers Algorithm), :GA (Genetic Algorithm), :PSO (Particle Swarm Optimization), :SA (Simulated Annealing)
 method = :PSO
 
-# Reference axis and beam nodes distribution of the mass and stiffness models to read (as in PazyS0MassModel.jl), which select the files of their combination. The optimized results are saved in files that also depend on them
-# nodes_distribution must be :ribs or :ribs_halved
+# Reference axis and beam mesh of the mass and stiffness models to read (as in PazyS0MassModel.jl), which select the files of their combination. The optimized results are saved in files that also depend on them
+# mesh must be :nominal or :refined
 reference_axis = 0.4653
-nodes_distribution = :ribs
+mesh = :nominal
 
 # Tip rod of the Nastran model: :rigid (the rod is rigid, so the tip section of the wing is, as the stiffness matrices require) or :flexible (the rod of the model, which bends). The results of each have the suffix _rigidtip or _flextip in their file names (see pazy_tip_suffix)
 tip = :rigid
@@ -22,7 +22,7 @@ tip = :rigid
 # :ends = one segment for each of the two elements of the end segments (root and tip) and a single one for the middle segment, for a total of five segments
 segments = :nodes
 
-# Starting point of the search: :nominal = the least squares stiffness matrices of the segments (S0_<RA>_<ND>_least_squares_stiffness_matrices_<segments>.csv), or :best = the best solution so far with the same segments (S0_<RA>_<ND>_best_stiffness_matrices_<segments>.csv, which must exist). With :best, the matrix of each segment is the mean of the element matrices of that segment in the best solution, and the bounds are centered on it. Note that the best file does not record GAy, GAz and the nominal matrices: use the same ones as in the run that generated it
+# Starting point of the search: :nominal = the least squares stiffness matrices of the segments (S0_RA<RA>_stiffness_matrices_<mesh>mesh_<tip>tip[_global|_ends].csv), or :best = the best solution so far with the same segments (S0_RA<RA>_best_stiffness_matrices_<mesh>mesh[_global|_ends].csv, which must exist). With :best, the matrix of each segment is the mean of the element matrices of that segment in the best solution, and the bounds are centered on it. Note that the best file does not record GAy, GAz and the nominal matrices: use the same ones as in the run that generated it
 startPoint = :nominal
 
 # Shear stiffnesses [N] that replace those of the nominal matrices of all the segments (useful for segments=:global). Use nothing to keep the original values (they must be positive)
@@ -102,14 +102,15 @@ elseif method == :SA
 end
 
 # Files
-nodes_distribution in (:ribs, :ribs_halved) || error("nodes_distribution must be :ribs or :ribs_halved")
+mesh in (:nominal, :refined) || error("mesh must be :nominal or :refined")
 segments in (:nodes, :global, :ends) || error("segments must be :nodes, :global or :ends")
 dir = normpath(pkgdir(BeamROM), "nastran", "Pazy_Technion", "S0")
-massFile = pazy_mass_model_file(; reference_axis, nodes_distribution)
-stiffnessFile = pazy_least_squares_stiffness_file(; reference_axis, nodes_distribution, segments, tip)
+massFile = pazy_mass_model_file(; reference_axis, mesh)
+stiffnessFile = pazy_least_squares_stiffness_file(; reference_axis, mesh, segments, tip)
 modalFile = joinpath(dir, "S0_modal_frequencies$(pazy_tip_suffix(tip)).csv")
-caseTag = "$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))"
-outputFile = joinpath(dir, "S0_$(caseTag)_optimized_stiffness_matrices_$segments.csv")
+caseTag = "$(pazy_reference_axis_tag(reference_axis))"
+caseSuffix = "$(pazy_mesh_tag(mesh))$(pazy_segments_suffix(segments))"
+outputFile = joinpath(dir, "S0_$(caseTag)_optimized_stiffness_matrices_$caseSuffix.csv")
 
 # Inertia data (as in PazyS0AeroBeamsModal.jl)
 mass = readdlm(massFile, ',', Float64; skipstart=1)
@@ -154,8 +155,8 @@ breaks = [y[breakNodes] .- y[1]; y[end] - y[1]]
 
 # Nominal stiffness matrices of the segments (least squares), symmetrized, with modified shear stiffnesses
 lsData = readdlm(stiffnessFile, ',', Float64; skipstart=1)
-size(lsData, 1) == nSeg || error("$stiffnessFile has $(size(lsData, 1)) segments, but the mass model has $nSeg: run PazyS0LeastSquaresStiffnessModel.jl with the same reference_axis, nodes_distribution and segments")
-isapprox(lsData[:, 2:3], [breaks[1:end-1] breaks[2:end]]; atol=1e-6 * L) || error("the segments of $stiffnessFile do not match those of the mass model: run PazyS0LeastSquaresStiffnessModel.jl with the same reference_axis, nodes_distribution and segments")
+size(lsData, 1) == nSeg || error("$stiffnessFile has $(size(lsData, 1)) segments, but the mass model has $nSeg: run PazyS0LeastSquaresStiffnessModel.jl with the same reference_axis, mesh and segments")
+isapprox(lsData[:, 2:3], [breaks[1:end-1] breaks[2:end]]; atol=1e-6 * L) || error("the segments of $stiffnessFile do not match those of the mass model: run PazyS0LeastSquaresStiffnessModel.jl with the same reference_axis, mesh and segments")
 S0s = [Matrix(transpose(reshape(lsData[g, 4:end], 6, 6))) for g in 1:nSeg]
 for S0 in S0s
     S0 .= (S0 + S0') / 2
@@ -308,8 +309,8 @@ function element_table(Selem)
     return [permutedims(header); permutedims.(rows)...]
 end
 
-# Best solution found so far with these segments, shared by all runs with the same reference axis, nodes distribution and segments: the stiffness matrices of all the elements and the value of the objective function, which depends only on these matrices, on nModes, on modalWeight and on the flutter and strains criteria settings. The file is updated only by a run that finds a lower objective. Its first two lines are "objective,nModes,flutterKey,modalWeight" (flutterKey identifies the flutter and strains settings, and is 0 if flutterSpeedWeight = 0 and flutterStrainsWeight = 0) and the values, followed by the element table
-bestFile = joinpath(dir, "S0_$(caseTag)_best_stiffness_matrices_$segments.csv")
+# Best solution found so far with these segments, shared by all runs with the same reference axis, mesh and segments: the stiffness matrices of all the elements and the value of the objective function, which depends only on these matrices, on nModes, on modalWeight and on the flutter and strains criteria settings. The file is updated only by a run that finds a lower objective. Its first two lines are "objective,nModes,flutterKey,modalWeight" (flutterKey identifies the flutter and strains settings, and is 0 if flutterSpeedWeight = 0 and flutterStrainsWeight = 0) and the values, followed by the element table
+bestFile = joinpath(dir, "S0_$(caseTag)_best_stiffness_matrices_$caseSuffix.csv")
 flutterKey = if flutterSpeedWeight == 0 && flutterStrainsWeight == 0
     UInt64(0)
 else
@@ -332,7 +333,7 @@ function read_best(file)
     # Files without modalWeight were written with the unit weight
     modalWeightBest = length(values) >= 4 ? parse(Float64, values[4]) : 1.0
     data = readdlm(file, ',', Float64; skipstart=3)
-    size(data, 1) == nElem || error("$file has $(size(data, 1)) elements, but the mass model has $nElem: remove it if the nodes distribution was changed")
+    size(data, 1) == nElem || error("$file has $(size(data, 1)) elements, but the mass model has $nElem: remove it if the mesh was changed")
     Selem = [Symmetric(Matrix(transpose(reshape(data[k, 4:end], 6, 6)))) for k in 1:nElem]
     # The stored objective is not comparable if it was computed with another number of modes, modal weight or flutter or strains settings
     (nModesBest == nModes && flutterKeyBest == flutterKey && modalWeightBest == modalWeight) || (obj = total_error(Selem))

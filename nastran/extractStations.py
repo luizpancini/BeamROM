@@ -4,7 +4,7 @@ Usage:  python extractStations.py "nastran/Pazy_Technion/S0" --job S0_static --s
 
 The response is the rigid body motion of the section, fitted to the displacements of all spar grids (property --spar-pid) at the same y (within --tol), referred to the point of the beam axis (see `section_motion`). The rotation about the chord axis is that of the plate at the twist center (--twist-center, see `twist_center`), so that the response does not depend on where the beam axis is. Any static job can be used, because the .op2 has the displacements of all grids; the axis is in meta.json (written by generatePazy.py --analyses static) and --stations are the spanwise positions of the nodes. For a swept wing (sweep in meta.json, generatePazy.py --sweep), the sections are still those of constant y, the point of the axis at the position y is at x_axis + y tan(sweep) and the response is in the beam frame rotated by the sweep angle (as that of the load node); the station is at the distance (y - y_root)/cos(sweep) from the root along the axis.
 
-Writes <job>.station_response_section.csv (<job>.station_response_section_<tag>.csv with --tag): the stations stacked, (6 n x 6) matrix where rows 6(k-1)+1:6k are [Tx, Ty, Tz, Rx, Ry, Rz] of station k (m and rad, in the beam frame: x1 = y of the Nastran model along the span, x2 = -x, x3 = z; with sweep, x1 = (sin(sweep), cos(sweep), 0), x2 = (-cos(sweep), sin(sweep), 0), x3 = z) and columns are the load cases (Fx, Fy, Fz, Mx, My, Mz). The root station is clamped (zeros).
+Prints to the standard output, as CSV and nothing else (no file is written; the messages go to the standard error): the stations stacked, (6 n x 6) matrix where rows 6(k-1)+1:6k are [Tx, Ty, Tz, Rx, Ry, Rz] of station k (m and rad, in the beam frame: x1 = y of the Nastran model along the span, x2 = -x, x3 = z; with sweep, x1 = (sin(sweep), cos(sweep), 0), x2 = (-cos(sweep), sin(sweep), 0), x3 = z) and columns are the load cases (Fx, Fy, Fz, Mx, My, Mz). The root station is clamped (zeros).
 """
 import argparse
 import sys
@@ -14,7 +14,7 @@ import numpy as np
 from pyNastran.bdf.bdf import BDF
 from pyNastran.op2.op2 import OP2
 
-from common import read_meta
+from common import messages_to_stderr, read_meta
 from generatePazy import beam_axis_x
 
 SPAR_PID = 100003
@@ -149,12 +149,12 @@ def section_response(ids, disp, bdf, stations, x_axis, y_root, y_end, spar_pid, 
 
 
 def main():
+    csv_out = messages_to_stderr()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("case_dir", type=Path)
     parser.add_argument("--job", required=True, help="name of the static job, without extension (e.g. S0_static)")
     parser.add_argument("--stations", nargs="+", type=float, required=True, help="spanwise positions (y) of the nodes of the discretized beam")
     parser.add_argument("--spar-pid", type=int, default=SPAR_PID, help="property of the shell elements of the spar")
-    parser.add_argument("--tag", help="label added to the name of the output, <job>.station_response_section_<tag>.csv, e.g. to keep the responses of different stations of the same job")
     parser.add_argument("--tol", type=float, default=TOL, help="tolerance in y to take the grids of the spar at a station")
     parser.add_argument("--twist-center", default="axis", help="chordwise position at which the rotation about the chord axis of the sections is taken: 'axis' (the beam axis, which gives a response that depends on the axis), 'auto' (the twist center, found from the reciprocity of the response, so that it does not depend on the axis) or a fraction of the chord between 0 and 1 (same as the --chord-fraction of generatePazy.py)")
     args = parser.parse_args()
@@ -173,12 +173,7 @@ def main():
     meta = read_meta(args.case_dir, args.job)
     T = section_response(ids, disp, args.case_dir / meta["model"], args.stations, meta["x_axis"], meta["y_root"], meta["y_end"], args.spar_pid, args.tol, meta_sweep(meta, args.job), args.twist_center)
 
-    out_file = args.case_dir / f"{args.job}.station_response_section{'_' + args.tag if args.tag else ''}.csv"
-    np.savetxt(out_file, T.reshape(-1, 6), delimiter=",", fmt="%.17e")
-    np.set_printoptions(precision=8, linewidth=150)
-    print("Response at the last station:")
-    print(T[-1])
-    print("Saved", out_file)
+    np.savetxt(csv_out, T.reshape(-1, 6), delimiter=",", fmt="%.17e")
 
 
 if __name__ == "__main__":

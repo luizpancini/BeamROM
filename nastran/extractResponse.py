@@ -2,7 +2,7 @@
 
 Usage:  python extractResponse.py nastran/simple_beams/solid_beam/mesh1 [--job S0_static]
 
-Writes <example>_static.response.csv (e.g. solid_beam_static.response.csv): the (6 x 6) matrix with rows = [Tx, Ty, Tz, Rx, Ry, Rz] at the load node (m and rad) and columns = load cases (Fx, Fy, Fz, Mx, My, Mz).
+Prints to the standard output, as CSV and nothing else (no file is written; the messages go to the standard error), the (6 x 6) matrix with rows = [Tx, Ty, Tz, Rx, Ry, Rz] at the load node (m and rad) and columns = load cases (Fx, Fy, Fz, Mx, My, Mz).
 """
 import argparse
 import sys
@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 from pyNastran.op2.op2 import OP2
 
-from common import read_meta
+from common import messages_to_stderr, read_meta
 
 
 def static_response(op2_file, load_node):
@@ -28,6 +28,7 @@ def static_response(op2_file, load_node):
 
 
 def main():
+    csv_out = messages_to_stderr()
     parser = argparse.ArgumentParser(description="Extract the static response from the .op2 of a case directory")
     parser.add_argument("case_dir", type=Path)
     parser.add_argument("--job", help="name of the static job, without extension (default: <example directory>_static)")
@@ -40,11 +41,7 @@ def main():
         sys.exit(f"{op2_file} not found: run Nastran first (runNastran.py)")
 
     T = static_response(op2_file, read_meta(args.case_dir, job)["load_node"]).T
-    out_file = args.case_dir / f"{job}.response.csv"
-    np.savetxt(out_file, T, delimiter=",", fmt="%.17e")
-    np.set_printoptions(precision=8, linewidth=150)
-    print(T)
-    print("Saved", out_file)
+    np.savetxt(csv_out, T, delimiter=",", fmt="%.17e")
 
 
 if __name__ == "__main__":

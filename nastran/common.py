@@ -3,10 +3,18 @@
 Layout: nastran/simple_beams/<example>/mesh<N>/ holds the .bdf, the Nastran outputs (.op2, .f06, ...), the extracted response and meta.json of each case.
 """
 import json
+import sys
 from pathlib import Path
 
 NASTRAN_DIR = Path(__file__).resolve().parent
 META_FILE = "meta.json"
+
+
+def messages_to_stderr():
+    """Reserves the standard output for CSV data (read by the Julia workflows): everything printed from here on (also by pyNastran) goes to the standard error. Returns the original standard output, for the data."""
+    data_stream = sys.stdout
+    sys.stdout = sys.stderr
+    return data_stream
 
 
 def case_dir(example, mesh):

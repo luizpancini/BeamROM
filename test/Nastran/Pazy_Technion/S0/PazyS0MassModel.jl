@@ -9,11 +9,11 @@ sweep = 0
 # Position of the reference axis, as a fraction of the chord
 reference_axis = 0.4653
 
-# Beam node distribution: :ribs places the nodes at the root, at the ribs (the first 2 ribs, close to the root, are lumped in the root node, and the last 3 of the 4 close to the tip are lumped in the tip node) and at the tip of the spar. :ribs_halved adds a node at the middle of each segment of :ribs, except the last one (twice as many elements, minus one). An integer gives that number of equally spaced nodes (e.g. 16) and a vector gives fractions of the span
-# Each combination of reference_axis and nodes_distribution is saved in its own file (S0_RA<reference_axis>_ND<nodes_distribution>_beam_mass_model.csv)
-nodes_distribution = [:ribs, :ribs_halved]
+# Beam mesh: :nominal places the nodes at the root, at the ribs (the first 2 ribs, close to the root, are lumped in the root node, and the last 3 of the 4 close to the tip are lumped in the tip node) and at the tip of the spar. :refined adds a node at the middle of each segment of :nominal, except the last one (twice as many elements, minus one). An integer gives that number of equally spaced nodes (e.g. 16) and a vector gives fractions of the span
+# Each combination of reference axis and mesh is saved in its own file (S0_RA<reference_axis>_inertia_matrices_<nominal|refined>mesh.csv)
+meshes = [:nominal, :refined]
 
-for mesh in nodes_distribution
+for mesh in meshes
 
     # Get GFEM model and compute the equivalent beam mass model
     bdf = joinpath(pkgdir(BeamROM), "nastran", "Pazy_Technion", "S0", "S0.bdf")
@@ -21,7 +21,7 @@ for mesh in nodes_distribution
 
     # Beam node coordinates in the output: x and z are in the Nastran basic frame (x = chordwise position from the origin of the reference system, i.e. the leading edge at x = 0 plus reference_axis of the chord), and only y starts at zero at the first node (the root of the spar axis). The offsets and tensors are relative to the nodes and to the centers of mass
     xref0 = [[x[1], x[2] - model.xref[1][2], x[3]] for x in model.xref]
-    write_beam_mass_csv(pazy_mass_model_file(; reference_axis, nodes_distribution=mesh), xref0, model.m, model.offsets, model.tensors)
+    write_beam_mass_csv(pazy_mass_model_file(; reference_axis, mesh), xref0, model.m, model.offsets, model.tensors)
 
     # Print summary of the reference axis and mass properties
     total_mass = sum(model.m)

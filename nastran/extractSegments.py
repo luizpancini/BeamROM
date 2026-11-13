@@ -4,7 +4,7 @@ Usage:  python extractSegments.py "nastran/Pazy_Technion/S0" --job S0_segments
 
 In the deck, subcases 6(w-1)+1 ... 6w are the six unit loads [F1, F2, F3, M1, M2, M3] at the grid of the station w+m, with the section of the station w clamped, where m is the number of intervals per window (`intervals` in <job>.json). The displacements of that grid are those of the end of the window w, a cantilever clamped at its upstream node and loaded at its downstream node. The stations come from <job>.json, written by generatePazy.py.
 
-Writes <job>.segment_response.csv: the windows stacked, (6 (n-m) x 6) matrix where rows 6(w-1)+1:6w are [Tx, Ty, Tz, Rx, Ry, Rz] of the downstream node of window w (m and rad, in the beam frame: x1 = y of the Nastran model along the span, x2 = -x, x3 = z) and columns are the load cases (Fx, Fy, Fz, Mx, My, Mz).
+Prints to the standard output, as CSV and nothing else (no file is written; the messages go to the standard error): the windows stacked, (6 (n-m) x 6) matrix where rows 6(w-1)+1:6w are [Tx, Ty, Tz, Rx, Ry, Rz] of the downstream node of window w (m and rad, in the beam frame: x1 = y of the Nastran model along the span, x2 = -x, x3 = z) and columns are the load cases (Fx, Fy, Fz, Mx, My, Mz).
 """
 import argparse
 import json
@@ -13,6 +13,8 @@ from pathlib import Path
 
 import numpy as np
 from pyNastran.op2.op2 import OP2
+
+from common import messages_to_stderr
 
 
 def read_displacements(op2_file, n_subcases):
@@ -37,6 +39,7 @@ def segment_response(ids, disp, stations, intervals=1):
 
 
 def main():
+    csv_out = messages_to_stderr()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("case_dir", type=Path)
     parser.add_argument("--job", required=True, help="name of the segments job, without extension (e.g. S0_segments)")
@@ -54,12 +57,7 @@ def main():
     ids, disp = read_displacements(op2_file, 6 * (len(stations) - intervals))
     T = segment_response(ids, disp, stations, intervals)
 
-    out_file = args.case_dir / f"{args.job}.segment_response.csv"
-    np.savetxt(out_file, T.reshape(-1, 6), delimiter=",", fmt="%.17e")
-    np.set_printoptions(precision=8, linewidth=150)
-    print("Response of the last window:")
-    print(T[-1])
-    print("Saved", out_file)
+    np.savetxt(csv_out, T.reshape(-1, 6), delimiter=",", fmt="%.17e")
 
 
 if __name__ == "__main__":

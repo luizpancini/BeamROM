@@ -24,10 +24,11 @@ function nastran_static_response(element::AbstractString, mesh::Integer; L, w, t
     nastranRun = run(ignorestatus(`$python $(joinpath(nastranDir, "runNastran.py")) $caseDir --jobs $job`))
     nastranRun.exitcode == 0 || error("Nastran has not produced the results (exit code $(nastranRun.exitcode)); see the messages above")
 
-    run(`$python $(joinpath(nastranDir, "extractResponse.py")) $caseDir`)
-
-    return readdlm(joinpath(caseDir, "$job.response.csv"), ',')
+    return read_extracted_csv(`$python $(joinpath(nastranDir, "extractResponse.py")) $caseDir`)
 end
+
+# Matrix printed as CSV on the standard output by an extraction script (extractResponse.py, extractStations.py, extractSegments.py), whose messages go to the standard error. No intermediate file is written
+read_extracted_csv(cmd) = readdlm(IOBuffer(read(cmd, String)), ',')
 
 const PAZY_MODAL_JOB = "S0_modal"
 
@@ -51,18 +52,24 @@ function pazy_reference_axis_tag(reference_axis::Real)
 end
 
 """
-    pazy_nodes_distribution_tag(nodes_distribution) -> String
+    pazy_mesh_tag(mesh) -> String
 
-Label of the beam nodes distribution in the names of the Pazy files, `"ND<x>"`: the name of the symbol (e.g. `:ribs` -> `"NDribs"`), the number of nodes (e.g. `16` -> `"ND16"`) or, for a vector of fractions of the span, its length and a checksum of its values (e.g. `"NDv5_1a2b3c4d"`).
+Label of the beam mesh in the names of the Pazy files, `"<x>mesh"`: the name of the symbol (e.g. `:nominal` -> `"nominalmesh"`, `:refined` -> `"refinedmesh"`), the number of nodes (e.g. `16` -> `"16mesh"`) or, for a vector of fractions of the span, its length and a checksum of its values (e.g. `"v5_1a2b3c4dmesh"`).
 """
-pazy_nodes_distribution_tag(nodes_distribution::Symbol) = "ND" * String(nodes_distribution)
-pazy_nodes_distribution_tag(nodes_distribution::Integer) = "ND$nodes_distribution"
-function pazy_nodes_distribution_tag(nodes_distribution::AbstractVector{<:Real})
+pazy_mesh_tag(mesh::Symbol) = String(mesh) * "mesh"
+pazy_mesh_tag(mesh::Integer) = "$(mesh)mesh"
+function pazy_mesh_tag(mesh::AbstractVector{<:Real})
     checksum = UInt32(2166136261) # FNV-1a
-    for byte in codeunits(join(Float64.(nodes_distribution), ","))
+    for byte in codeunits(join(Float64.(mesh), ","))
         checksum = (checksum ⊻ byte) * UInt32(16777619)
     end
-    return "NDv$(length(nodes_distribution))_" * string(checksum, base=16, pad=8)
+    return "v$(length(mesh))_" * string(checksum, base=16, pad=8) * "mesh"
+end
+
+# Suffix of the names of the least squares stiffness files for the `segments` of the fit: none for :nodes (one matrix for each segment between the beam nodes, as in AeroBeams), "_global" or "_ends" otherwise
+function pazy_segments_suffix(segments::Symbol)
+    segments in (:nodes, :global, :ends) || throw(ArgumentError("segments must be :nodes, :global or :ends, got $segments"))
+    return segments == :nodes ? "" : "_$segments"
 end
 
 # Name of the Nastran job (static or segments) of the Technion Pazy wing for a tag: <model>_<tag>_<kind>
@@ -100,39 +107,39 @@ function pazy_tip_responses(f, tips=(:rigid, :flexible))
 end
 
 """
-    pazy_mass_model_file(; reference_axis, nodes_distribution) -> String
+    pazy_mass_model_file(; reference_axis, mesh) -> String
 
-Path of the CSV file with the equivalent beam mass model of the Technion Pazy wing for the given reference axis (chord fraction) and nodes distribution (see `pazy_beam_mass_model`), which is nastran/Pazy_Technion/S0/S0_RA<x>_ND<y>_beam_mass_model.csv. Each combination has its own file.
+Path of the CSV file with the equivalent beam mass model of the Technion Pazy wing for the given reference axis (chord fraction) and mesh (see `pazy_beam_mass_model`), which is nastran/Pazy_Technion/S0/S0_RA<x>_inertia_matrices_<mesh>.csv (see `pazy_mesh_tag`), as in AeroBeams (test/referenceData/Pazy) except for the reference axis.
 """
-pazy_mass_model_file(; reference_axis::Real, nodes_distribution) = joinpath(@__DIR__, "Pazy_Technion", "S0", "S0_$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))_beam_mass_model.csv")
+pazy_mass_model_file(; reference_axis::Real, mesh) = joinpath(@__DIR__, "Pazy_Technion", "S0", "S0_$(pazy_reference_axis_tag(reference_axis))_inertia_matrices_$(pazy_mesh_tag(mesh)).csv")
 
 """
     pazy_stiffness_file(; reference_axis, tip=:rigid) -> String
 
-Path of the CSV file with the global stiffness matrix of the Technion Pazy wing for the given reference axis (chord fraction), which is nastran/Pazy_Technion/S0/S0_RA<x>_stiffness_matrix<suffix>.csv, with the suffix of the rigid or flexible tip rod `tip` (see `pazy_tip_suffix`). The nodes distribution does not affect it.
+Path of the CSV file with the global stiffness matrix of the Technion Pazy wing for the given reference axis (chord fraction), which is nastran/Pazy_Technion/S0/S0_RA<x>_stiffness_matrix<suffix>.csv, with the suffix of the rigid or flexible tip rod `tip` (see `pazy_tip_suffix`). The mesh does not affect it.
 """
 pazy_stiffness_file(; reference_axis::Real, tip::Symbol=:rigid) = joinpath(@__DIR__, "Pazy_Technion", "S0", "S0_$(pazy_reference_axis_tag(reference_axis))_stiffness_matrix$(pazy_tip_suffix(tip)).csv")
 
 """
-    pazy_discretized_stiffness_file(; reference_axis, nodes_distribution, tip=:rigid) -> String
+    pazy_discretized_stiffness_file(; reference_axis, mesh, tip=:rigid) -> String
 
-Path of the CSV file with the discretized stiffness matrices of the Technion Pazy wing for the given reference axis and nodes distribution (see `nastran_pazy_station_response`), which is nastran/Pazy_Technion/S0/S0_RA<x>_ND<y>_discretized_stiffness_matrices<suffix>.csv (see `pazy_tip_suffix`).
+Path of the CSV file with the discretized stiffness matrices of the Technion Pazy wing for the given reference axis and mesh (see `nastran_pazy_station_response`), which is nastran/Pazy_Technion/S0/S0_RA<x>_discretized_stiffness_matrices_<mesh><suffix>.csv (see `pazy_mesh_tag` and `pazy_tip_suffix`).
 """
-pazy_discretized_stiffness_file(; reference_axis::Real, nodes_distribution, tip::Symbol=:rigid) = joinpath(@__DIR__, "Pazy_Technion", "S0", "S0_$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))_discretized_stiffness_matrices$(pazy_tip_suffix(tip)).csv")
-
-"""
-    pazy_clamped_segment_stiffness_file(; reference_axis, nodes_distribution, intervals, method, tip=:rigid) -> String
-
-Path of the CSV file with the clamped segment stiffness matrices of the Technion Pazy wing for the given reference axis and nodes distribution, which is nastran/Pazy_Technion/S0/S0_RA<x>_ND<y>_clamped_segment_stiffness_matrices_intervals<intervals>_<method><suffix>.csv (see `pazy_tip_suffix`).
-"""
-pazy_clamped_segment_stiffness_file(; reference_axis::Real, nodes_distribution, intervals::Integer, method, tip::Symbol=:rigid) = joinpath(@__DIR__, "Pazy_Technion", "S0", "S0_$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))_clamped_segment_stiffness_matrices_intervals$(intervals)_$method$(pazy_tip_suffix(tip)).csv")
+pazy_discretized_stiffness_file(; reference_axis::Real, mesh, tip::Symbol=:rigid) = joinpath(@__DIR__, "Pazy_Technion", "S0", "S0_$(pazy_reference_axis_tag(reference_axis))_discretized_stiffness_matrices_$(pazy_mesh_tag(mesh))$(pazy_tip_suffix(tip)).csv")
 
 """
-    pazy_least_squares_stiffness_file(; reference_axis, nodes_distribution, segments, tip=:rigid) -> String
+    pazy_clamped_segment_stiffness_file(; reference_axis, mesh, intervals, method, tip=:rigid) -> String
 
-Path of the CSV file with the stiffness matrices of the Technion Pazy wing fitted by `least_squares_stiffness_matrices` (`segments` = `:nodes` for one for each segment between the beam nodes, `:global` for a single one, `:ends` for five: one for each of the two elements of the end segments and one for the middle segment) for the given reference axis and nodes distribution, which is nastran/Pazy_Technion/S0/S0_RA<x>_ND<y>_least_squares_stiffness_matrices_<segments><suffix>.csv (see `pazy_tip_suffix`).
+Path of the CSV file with the clamped segment stiffness matrices of the Technion Pazy wing for the given reference axis and mesh, which is nastran/Pazy_Technion/S0/S0_RA<x>_clamped_segment_stiffness_matrices_<mesh>_intervals<intervals>_<method><suffix>.csv (see `pazy_mesh_tag` and `pazy_tip_suffix`).
 """
-pazy_least_squares_stiffness_file(; reference_axis::Real, nodes_distribution, segments::Symbol, tip::Symbol=:rigid) = joinpath(@__DIR__, "Pazy_Technion", "S0", "S0_$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))_least_squares_stiffness_matrices_$segments$(pazy_tip_suffix(tip)).csv")
+pazy_clamped_segment_stiffness_file(; reference_axis::Real, mesh, intervals::Integer, method, tip::Symbol=:rigid) = joinpath(@__DIR__, "Pazy_Technion", "S0", "S0_$(pazy_reference_axis_tag(reference_axis))_clamped_segment_stiffness_matrices_$(pazy_mesh_tag(mesh))_intervals$(intervals)_$method$(pazy_tip_suffix(tip)).csv")
+
+"""
+    pazy_least_squares_stiffness_file(; reference_axis, mesh, segments, tip=:rigid) -> String
+
+Path of the CSV file with the stiffness matrices of the Technion Pazy wing fitted by `least_squares_stiffness_matrices` (`segments` = `:nodes` for one for each segment between the beam nodes, `:global` for a single one, `:ends` for five: one for each of the two elements of the end segments and one for the middle segment) for the given reference axis and mesh, which is nastran/Pazy_Technion/S0/S0_RA<x>_stiffness_matrices_<mesh><suffix>.csv (see `pazy_mesh_tag` and `pazy_tip_suffix`), as in AeroBeams (test/referenceData/Pazy) but with the reference axis. The files of `:global` and `:ends` have the suffix `_global` and `_ends` (see `pazy_segments_suffix`).
+"""
+pazy_least_squares_stiffness_file(; reference_axis::Real, mesh, segments::Symbol, tip::Symbol=:rigid) = joinpath(@__DIR__, "Pazy_Technion", "S0", "S0_$(pazy_reference_axis_tag(reference_axis))_stiffness_matrices_$(pazy_mesh_tag(mesh))$(pazy_tip_suffix(tip))$(pazy_segments_suffix(segments)).csv")
 
 # Exit code 2: Nastran is not installed here
 function run_pazy_nastran(python, nastranDir, caseDir, job)
@@ -156,20 +163,19 @@ function nastran_pazy_static_response(; reference_axis::Real, tip::Symbol=:rigid
 
     run(`$python $(joinpath(nastranDir, "generatePazy.py")) --sweep $PAZY_STRAIGHT_SWEEP --analyses static --tag $tag --chord-fraction $reference_axis --tip $tip`)
     run_pazy_nastran(python, nastranDir, caseDir, job)
-    run(`$python $(joinpath(nastranDir, "extractResponse.py")) $caseDir --job $job`)
 
     L = parse(Float64, match(r"\"L\":\s*([-+0-9.eE]+)", read(joinpath(caseDir, "$job.meta.json"), String)).captures[1])
-    T = readdlm(joinpath(caseDir, "$job.response.csv"), ',')
+    T = read_extracted_csv(`$python $(joinpath(nastranDir, "extractResponse.py")) $caseDir --job $job`)
 
     return T, L
 end
 
 """
-    nastran_pazy_station_response(y; reference_axis, nodes_distribution, tol=1e-5, twist_center=:auto, tip=:rigid)
+    nastran_pazy_station_response(y; reference_axis, tol=1e-5, twist_center=:auto, tip=:rigid)
 
-Static Nastran workflow for the Technion Pazy wing (nastran/Pazy_Technion/S0/S0.bdf) to get the generalized displacements of the nodes of a discretized beam, whose axis is the one of `nastran_pazy_static_response` (the loads are the same: the six unit loads at the end of the axis, with the root section clamped). `y` are the spanwise positions (y of the Nastran model) of the nodes, from the root to the end of the spar, e.g. `[x[2] for x in spar_reference_axis(read_gfem(bdf), :ribs; reference_axis)]`, which must be at rows of grids of the spar (within `tol`). `nodes_distribution` is the one that gives `y`; it only labels the files (see `pazy_nodes_distribution_tag`), so that each combination of reference axis and nodes distribution has its own.
+Static Nastran workflow for the Technion Pazy wing (nastran/Pazy_Technion/S0/S0.bdf) to get the generalized displacements of the nodes of a discretized beam, whose axis is the one of `nastran_pazy_static_response` (the loads are the same: the six unit loads at the end of the axis, with the root section clamped). `y` are the spanwise positions (y of the Nastran model) of the nodes, from the root to the end of the spar, e.g. `[x[2] for x in spar_reference_axis(read_gfem(bdf), :nominal; reference_axis)]`, which must be at rows of grids of the spar (within `tol`).
 
-The generalized displacements of a node are the rigid body motion of the section, fitted to the displacements of all the spar grids at that y, referred to the axis (extractStations.py). It uses the job of `nastran_pazy_static_response`, so no extra Nastran run is needed; its output is S0_RA<x>_static<suffix>.station_response_section_ND<y>.csv, with the suffix of the rigid or flexible tip rod `tip` (see `nastran_pazy_static_response`).
+The generalized displacements of a node are the rigid body motion of the section, fitted to the displacements of all the spar grids at that y, referred to the axis (extractStations.py). It uses the job of `nastran_pazy_static_response`, so no extra Nastran run is needed, and no file is written: the script prints the response (see `read_extracted_csv`).
 
 The translations and the rotations about the span and normal axes come from the translations of all the spar grids at the node, and the rotation about the chord axis from the rotations of the grids about it (the normal of the plate), which vary linearly along the chord with the twist rate (warping of the section). The rigid body rotation of the section is the value of that fit at the twist center, where the warping vanishes, and `twist_center` sets that position: `:auto` (default) finds it from the response (the position at which the rotation about the normal axis under the moment about the span equals the rotation about the span under the moment about the normal axis, as the reciprocity of the beam model requires, which is the same for every reference axis; it is printed), a number is a fraction of the chord (as `reference_axis`) and `:axis` takes it at the reference axis. With `:axis` the response, and hence the stiffness matrices, depend on the position of the axis through the warping of the section, which the beam model cannot represent (e.g. its shear center shifts towards the axis); with the twist center they do not (the beam is the same one for any reference axis, with the matrices at another point related by a rigid transformation).
 
@@ -177,46 +183,43 @@ Returns `(T, L)`: `T` is a vector with the (6 x 6) generalized displacements of 
 
 If Nastran is not available on this machine, an error is raised after listing the .bdf to run elsewhere (see `nastran_pazy_static_response`). The Python interpreter is the project's `.venv` unless the BEAMROM_PYTHON environment variable is set.
 """
-function nastran_pazy_station_response(y::AbstractVector{<:Real}; reference_axis::Real, nodes_distribution, tol::Real=1e-5, twist_center::Union{Symbol,Real}=:auto, tip::Symbol=:rigid)
+function nastran_pazy_station_response(y::AbstractVector{<:Real}; reference_axis::Real, tol::Real=1e-5, twist_center::Union{Symbol,Real}=:auto, tip::Symbol=:rigid)
     twist_center isa Real || twist_center in (:auto, :axis) || throw(ArgumentError("twist_center must be :auto, :axis or a fraction of the chord, got $twist_center"))
     python, nastranDir, caseDir = pazy_python_and_dirs()
     axisTag = pazy_reference_axis_tag(reference_axis)
-    nodesTag = pazy_nodes_distribution_tag(nodes_distribution)
     job = pazy_job("static", axisTag) * pazy_tip_suffix(tip)
     generate = joinpath(nastranDir, "generatePazy.py")
     extract = joinpath(nastranDir, "extractStations.py")
 
     run(`$python $generate --sweep $PAZY_STRAIGHT_SWEEP --analyses static --tag $axisTag --chord-fraction $reference_axis --tip $tip`)
     run_pazy_nastran(python, nastranDir, caseDir, job)
-    run(`$python $extract $caseDir --job $job --stations $y --tol $tol --tag $nodesTag --twist-center $twist_center`)
 
     L = parse(Float64, match(r"\"L\":\s*([-+0-9.eE]+)", read(joinpath(caseDir, "$job.meta.json"), String)).captures[1])
-    Tall = readdlm(joinpath(caseDir, "$job.station_response_section_$nodesTag.csv"), ',')
+    Tall = read_extracted_csv(`$python $extract $caseDir --job $job --stations $y --tol $tol --twist-center $twist_center`)
     T = [Tall[6*(k-1)+1:6*k, :] for k in eachindex(y)]
 
     return T, L
 end
 
 """
-    nastran_pazy_segment_response(y; intervals=1, reference_axis, nodes_distribution, tol=1e-5, tip=:rigid)
+    nastran_pazy_segment_response(y; intervals=1, reference_axis, mesh, tol=1e-5, tip=:rigid)
 
-Static Nastran workflow for the Technion Pazy wing (nastran/Pazy_Technion/S0/S0.bdf) to get the generalized displacements of windows of `intervals` consecutive segments of a discretized beam analyzed as cantilevers: in a single job (S0_RA<x>_ND<y>_segments<suffix>, with the suffix of the rigid or flexible tip rod `tip`, see `nastran_pazy_static_response`; generatePazy.py --analyses segments, extractSegments.py) with six load cases for each window `w` (`w = 1, ..., n - intervals`), the section of the wing at the node `w` is clamped and the six unit loads are applied at the node `w + intervals`, whose displacements are taken. The rest of the wing is kept. The same BDF is overwritten for each `intervals`; when the content of the BDF changes (`intervals`, `y`, `reference_axis`) the .op2 and the other outputs of the previous job are deleted, and Nastran has to be run again. `y` are the spanwise positions (y of the Nastran model) of the nodes, from the root to the end of the spar, as in `nastran_pazy_station_response` (see there for `nodes_distribution`, which labels the files: each combination of reference axis and nodes distribution has its own job), and the nodes are the grids on the beam axis tied by an RBE3 to the spar grids at that y. The loads are applied where the displacements are taken, so the displacement-force matrices of the segments are reciprocal.
+Static Nastran workflow for the Technion Pazy wing (nastran/Pazy_Technion/S0/S0.bdf) to get the generalized displacements of windows of `intervals` consecutive segments of a discretized beam analyzed as cantilevers: in a single job (S0_RA<x>_<mesh>_segments<suffix>, with the suffix of the rigid or flexible tip rod `tip`, see `nastran_pazy_static_response`; generatePazy.py --analyses segments, extractSegments.py) with six load cases for each window `w` (`w = 1, ..., n - intervals`), the section of the wing at the node `w` is clamped and the six unit loads are applied at the node `w + intervals`, whose displacements are taken. The rest of the wing is kept. The same BDF is overwritten for each `intervals`; when the content of the BDF changes (`intervals`, `y`, `reference_axis`) the .op2 and the other outputs of the previous job are deleted, and Nastran has to be run again. `y` are the spanwise positions (y of the Nastran model) of the nodes, from the root to the end of the spar, as in `nastran_pazy_station_response`, and `mesh` is the one that gives them (see `pazy_mesh_tag`), which labels the job: each combination of reference axis and mesh has its own. The nodes are the grids on the beam axis tied by an RBE3 to the spar grids at that y. The loads are applied where the displacements are taken, so the displacement-force matrices of the segments are reciprocal.
 
 Returns `(T, L)`: `T` is a vector with the `length(y) - intervals` (6 x 6) generalized displacements of the downstream node of each window, in the beam frame (x1 along the span, x2 = -x of the Nastran model, x3 = z), rows = [u; θ] and columns = load cases [F1, F2, F3, M1, M2, M3], and `L` is the length of the beam [m] (from the root section to the end of the spar).
 
-If Nastran is not available on this machine, an error is raised after listing the .bdf to run elsewhere (e.g. on a Windows VM, with `python nastran/runNastran.py "nastran/Pazy_Technion/S0" --jobs S0_RA0p43_NDribs_segments`). Copy the .op2 file back to that directory and call this function again. The Python interpreter is the project's `.venv` unless the BEAMROM_PYTHON environment variable is set.
+If Nastran is not available on this machine, an error is raised after listing the .bdf to run elsewhere (e.g. on a Windows VM, with `python nastran/runNastran.py "nastran/Pazy_Technion/S0" --jobs S0_RA0p43_nominalmesh_segments`). Copy the .op2 file back to that directory and call this function again. The Python interpreter is the project's `.venv` unless the BEAMROM_PYTHON environment variable is set.
 """
-function nastran_pazy_segment_response(y::AbstractVector{<:Real}; intervals::Integer=1, reference_axis::Real, nodes_distribution, tol::Real=1e-5, tip::Symbol=:rigid)
+function nastran_pazy_segment_response(y::AbstractVector{<:Real}; intervals::Integer=1, reference_axis::Real, mesh, tol::Real=1e-5, tip::Symbol=:rigid)
     python, nastranDir, caseDir = pazy_python_and_dirs()
-    tag = "$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))"
+    tag = "$(pazy_reference_axis_tag(reference_axis))_$(pazy_mesh_tag(mesh))"
     job = pazy_job("segments", tag) * pazy_tip_suffix(tip)
 
     run(`$python $(joinpath(nastranDir, "generatePazy.py")) --sweep $PAZY_STRAIGHT_SWEEP --analyses segments --tag $tag --chord-fraction $reference_axis --intervals $intervals --stations $y --tol $tol --tip $tip`)
     run_pazy_nastran(python, nastranDir, caseDir, job)
-    run(`$python $(joinpath(nastranDir, "extractSegments.py")) $caseDir --job $job`)
 
     L = parse(Float64, match(r"\"L\":\s*([-+0-9.eE]+)", read(joinpath(caseDir, "$job.json"), String)).captures[1])
-    Tall = readdlm(joinpath(caseDir, "$job.segment_response.csv"), ',')
+    Tall = read_extracted_csv(`$python $(joinpath(nastranDir, "extractSegments.py")) $caseDir --job $job`)
     T = [Tall[6*(k-1)+1:6*k, :] for k in 1:length(y)-intervals]
 
     return T, L
@@ -288,11 +291,11 @@ end
 pazy_swept_name(sweep::Real, version::AbstractString) = "$(pazy_swept_label(sweep))_$(version == "Baseline" ? "baseline" : version)"
 
 """
-    pazy_swept_mass_model_file(sweep, version; reference_axis, nodes_distribution) -> String
+    pazy_swept_mass_model_file(sweep, version; reference_axis, mesh) -> String
 
-Path of the CSV file with the equivalent beam mass model of the swept wing with `sweep` degrees of sweep (S10, S20), `version`, for the given reference axis (chord fraction or `nothing`) and nodes distribution (see `pazy_beam_mass_model`), which is nastran/Pazy_Technion/S<sweep>/<version>/S<sweep>_<version>_RA<x>_ND<y>_beam_mass_model.csv. Each combination has its own file.
+Path of the CSV file with the equivalent beam mass model of the swept wing with `sweep` degrees of sweep (S10, S20), `version`, for the given reference axis and mesh (see `pazy_beam_mass_model`), which is nastran/Pazy_Technion/S<sweep>/<version>/S<sweep>_<version>_RA<x>_inertia_matrices_<mesh>.csv (see `pazy_mesh_tag`; the version is as in `pazy_swept_name`, e.g. S10_baseline), as in AeroBeams (test/referenceData/Pazy) except for the reference axis.
 """
-pazy_swept_mass_model_file(sweep::Real, version::AbstractString; reference_axis::Real, nodes_distribution) = joinpath(pazy_swept_dir(sweep, version), "$(pazy_swept_label(sweep))_$(version)_$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))_beam_mass_model.csv")
+pazy_swept_mass_model_file(sweep::Real, version::AbstractString; reference_axis::Real, mesh) = joinpath(pazy_swept_dir(sweep, version), "$(pazy_swept_name(sweep, version))_$(pazy_reference_axis_tag(reference_axis))_inertia_matrices_$(pazy_mesh_tag(mesh)).csv")
 
 # Elements of the tip rod of the swept models that a model without the rod leaves out: the CBEAM properties of the rod (13) and of the breaking beam (24, LE and TE), and the CONM2 of the fixed adapter and of the FPS weights (the calibration mass is part of the wing and stays). Their ids depend on the wing: S10 has the fixed adapter 205 and the FPS weights 433 (LE and TE); S20 has the FPS weights 203 (LE) and 433 (TE), and the fixed adapter 204 (LE and TE), and its 205 is the calibration mass
 const PAZY_SWEPT_ROD_BEAM_PIDS = (13, 24)
@@ -324,25 +327,25 @@ function pazy_swept_no_rod_dirs(sweep::Real, version::AbstractString)
 end
 
 """
-    pazy_swept_no_rod_mass_model_file(sweep, version; reference_axis, nodes_distribution) -> String
+    pazy_swept_no_rod_mass_model_file(sweep, version; reference_axis, mesh) -> String
 
-Path of the CSV file with the equivalent beam mass model of the swept wing with `sweep` degrees of sweep, `version`, without the tip rod (nor the adapter and the FPS weights, see `PAZY_SWEPT_ROD_BEAM_PIDS` and `pazy_swept_rod_conm2`; the calibration mass is part of the wing and stays), for the given reference axis (chord fraction) and nodes distribution, which is nastran/Pazy_Technion/S<sweep>/NoRod/S<sweep>_<version>_norod_RA<x>_ND<y>_beam_mass_model.csv.
+Path of the CSV file with the equivalent beam mass model of the swept wing with `sweep` degrees of sweep, `version`, without the tip rod (nor the adapter and the FPS weights, see `PAZY_SWEPT_ROD_BEAM_PIDS` and `pazy_swept_rod_conm2`; the calibration mass is part of the wing and stays), for the given reference axis and mesh, which is nastran/Pazy_Technion/S<sweep>/NoRod/S<sweep>_<version>_norod_RA<x>_inertia_matrices_<mesh>.csv (see `pazy_mesh_tag`; the version is as in `pazy_swept_name`).
 """
-pazy_swept_no_rod_mass_model_file(sweep::Real, version::AbstractString; reference_axis::Real, nodes_distribution) = joinpath(pazy_swept_no_rod_dir(sweep, version), "$(pazy_swept_label(sweep))_$(version)_norod_$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))_beam_mass_model.csv")
+pazy_swept_no_rod_mass_model_file(sweep::Real, version::AbstractString; reference_axis::Real, mesh) = joinpath(pazy_swept_no_rod_dir(sweep, version), "$(pazy_swept_no_rod_name(sweep, version))_$(pazy_reference_axis_tag(reference_axis))_inertia_matrices_$(pazy_mesh_tag(mesh)).csv")
 
 """
     pazy_swept_stiffness_file(sweep, version; reference_axis, tip=:rigid) -> String
 
-Path of the CSV file with the global stiffness matrix of the swept wing with `sweep` degrees of sweep, `version`, for the given reference axis (chord fraction or `nothing`), which is nastran/Pazy_Technion/S<sweep>/<version>/S<sweep>_<version>_RA<x>_stiffness_matrix<suffix>.csv, with the suffix of the rigid or flexible tip rod `tip` (see `pazy_tip_suffix`). The nodes distribution does not affect it.
+Path of the CSV file with the global stiffness matrix of the swept wing with `sweep` degrees of sweep, `version`, for the given reference axis (chord fraction or `nothing`), which is nastran/Pazy_Technion/S<sweep>/<version>/S<sweep>_<version>_RA<x>_stiffness_matrix<suffix>.csv, with the suffix of the rigid or flexible tip rod `tip` (see `pazy_tip_suffix`). The mesh does not affect it.
 """
 pazy_swept_stiffness_file(sweep::Real, version::AbstractString; reference_axis::Real, tip::Symbol=:rigid) = joinpath(pazy_swept_dir(sweep, version), "$(pazy_swept_label(sweep))_$(version)_$(pazy_reference_axis_tag(reference_axis))_stiffness_matrix$(pazy_tip_suffix(tip)).csv")
 
 """
-    pazy_swept_least_squares_stiffness_file(sweep, version; reference_axis, nodes_distribution, segments, tip=:rigid) -> String
+    pazy_swept_least_squares_stiffness_file(sweep, version; reference_axis, mesh, segments, tip=:rigid) -> String
 
-Path of the CSV file with the stiffness matrices of the swept wing with `sweep` degrees of sweep, `version`, fitted by `least_squares_stiffness_matrices` (`segments` = `:nodes`, `:global` or `:ends`, see `pazy_least_squares_stiffness_file`) for the given reference axis and nodes distribution, which is nastran/Pazy_Technion/S<sweep>/<version>/S<sweep>_<version>_RA<x>_ND<y>_least_squares_stiffness_matrices_<segments><suffix>.csv, with the suffix of the rigid or flexible tip rod `tip` (see `pazy_tip_suffix`).
+Path of the CSV file with the stiffness matrices of the swept wing with `sweep` degrees of sweep, `version`, fitted by `least_squares_stiffness_matrices` (`segments` = `:nodes`, `:global` or `:ends`, see `pazy_least_squares_stiffness_file`) for the given reference axis and mesh, which is nastran/Pazy_Technion/S<sweep>/<version>/S<sweep>_<version>_RA<x>_stiffness_matrices_<mesh><suffix>.csv (see `pazy_mesh_tag`; the version is as in `pazy_swept_name`, e.g. S10_baseline), with the suffix of the rigid or flexible tip rod `tip` (see `pazy_tip_suffix`), and `_global` or `_ends` after it for those `segments` (see `pazy_segments_suffix`).
 """
-pazy_swept_least_squares_stiffness_file(sweep::Real, version::AbstractString; reference_axis::Real, nodes_distribution, segments::Symbol, tip::Symbol=:rigid) = joinpath(pazy_swept_dir(sweep, version), "$(pazy_swept_label(sweep))_$(version)_$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))_least_squares_stiffness_matrices_$segments$(pazy_tip_suffix(tip)).csv")
+pazy_swept_least_squares_stiffness_file(sweep::Real, version::AbstractString; reference_axis::Real, mesh, segments::Symbol, tip::Symbol=:rigid) = joinpath(pazy_swept_dir(sweep, version), "$(pazy_swept_name(sweep, version))_$(pazy_reference_axis_tag(reference_axis))_stiffness_matrices_$(pazy_mesh_tag(mesh))$(pazy_tip_suffix(tip))$(pazy_segments_suffix(segments)).csv")
 
 """
     pazy_swept_no_rod_stiffness_file(sweep, version; reference_axis) -> String
@@ -352,11 +355,11 @@ Path of the CSV file with the global stiffness matrix of the swept wing with `sw
 pazy_swept_no_rod_stiffness_file(sweep::Real, version::AbstractString; reference_axis::Real) = joinpath(pazy_swept_no_rod_dir(sweep, version), "$(pazy_swept_label(sweep))_$(version)_norod_$(pazy_reference_axis_tag(reference_axis))_stiffness_matrix.csv")
 
 """
-    pazy_swept_no_rod_least_squares_stiffness_file(sweep, version; reference_axis, nodes_distribution, segments) -> String
+    pazy_swept_no_rod_least_squares_stiffness_file(sweep, version; reference_axis, mesh, segments) -> String
 
-Path of the CSV file with the stiffness matrices of the swept wing with `sweep` degrees of sweep, `version`, without the tip rod, fitted by `least_squares_stiffness_matrices` (`segments` = `:nodes`, `:global` or `:ends`) for the given reference axis and nodes distribution, which is nastran/Pazy_Technion/S<sweep>/NoRod/S<sweep>_<version>_norod_RA<x>_ND<y>_least_squares_stiffness_matrices_<segments>.csv.
+Path of the CSV file with the stiffness matrices of the swept wing with `sweep` degrees of sweep, `version`, without the tip rod, fitted by `least_squares_stiffness_matrices` (`segments` = `:nodes`, `:global` or `:ends`) for the given reference axis and mesh, which is nastran/Pazy_Technion/S<sweep>/NoRod/S<sweep>_<version>_norod_RA<x>_stiffness_matrices_<mesh>.csv (see `pazy_mesh_tag`; the version is as in `pazy_swept_name`), and `_global` or `_ends` after it for those `segments` (see `pazy_segments_suffix`).
 """
-pazy_swept_no_rod_least_squares_stiffness_file(sweep::Real, version::AbstractString; reference_axis::Real, nodes_distribution, segments::Symbol) = joinpath(pazy_swept_no_rod_dir(sweep, version), "$(pazy_swept_label(sweep))_$(version)_norod_$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))_least_squares_stiffness_matrices_$segments.csv")
+pazy_swept_no_rod_least_squares_stiffness_file(sweep::Real, version::AbstractString; reference_axis::Real, mesh, segments::Symbol) = joinpath(pazy_swept_no_rod_dir(sweep, version), "$(pazy_swept_no_rod_name(sweep, version))_$(pazy_reference_axis_tag(reference_axis))_stiffness_matrices_$(pazy_mesh_tag(mesh))$(pazy_segments_suffix(segments)).csv")
 
 
 function pazy_swept_dirs(sweep::Real, version::AbstractString)
@@ -434,31 +437,27 @@ function nastran_pazy_swept_static_response(sweep::Real, version::AbstractString
 
     run(`$python $(joinpath(nastranDir, "generatePazy.py")) --bdf $bdf --analyses static --sweep $sweep --tag $tag --chord-fraction $reference_axis --tip $tip --rigid-pids $(collect(PAZY_SWEPT_ROD_BEAM_PIDS))`)
     run_pazy_nastran(python, nastranDir, caseDir, job)
-    run(`$python $(joinpath(nastranDir, "extractResponse.py")) $caseDir --job $job`)
 
     L = parse(Float64, match(r"\"L\":\s*([-+0-9.eE]+)", read(joinpath(caseDir, "$job.meta.json"), String)).captures[1])
-    T = readdlm(joinpath(caseDir, "$job.response.csv"), ',')
+    T = read_extracted_csv(`$python $(joinpath(nastranDir, "extractResponse.py")) $caseDir --job $job`)
 
     return T, L
 end
 
 """
-    nastran_pazy_swept_station_response(sweep, version, y; reference_axis, nodes_distribution, tol=1e-5, twist_center=:auto, tip=:rigid)
+    nastran_pazy_swept_station_response(sweep, version, y; reference_axis, tol=1e-5, twist_center=:auto, tip=:rigid)
 
-Generalized displacements of the nodes of a discretized beam of the swept Technion Pazy wing with `sweep` degrees of sweep (S10, S20), `version` = "LE", "TE" or "Baseline", under the six unit loads at the end of the beam axis, from the job of `nastran_pazy_swept_static_response` (which is generated and run if needed, so no extra Nastran run is required): the rigid body motion of each section, fitted to the displacements of all the spar grids at that y and referred to the point of the axis there (extractStations.py, as in `nastran_pazy_station_response`). `y` are the spanwise positions (y of the Nastran model) of the nodes, from the root to the end of the spar, e.g. `[x[2] for x in spar_reference_axis(read_gfem(bdf), :ribs; reference_axis, sweep)]`, which must be at rows of grids of the spar (within `tol`). The sections are those of constant y, so the nodes are at the distances `(y .- y[1]) ./ cosd(sweep)` from the root along the inclined axis. `nodes_distribution` is the one that gives `y`; it only labels the output, S<sweep>_<version>_RA<x>_static<suffix>.station_response_section_ND<y>.csv, with the suffix of the rigid or flexible tip rod `tip` (see `nastran_pazy_swept_static_response`). The rotation about the chord axis of the sections is taken at the twist center, as in `nastran_pazy_station_response` (`twist_center` = `:auto`, the default, a fraction of the chord or `:axis`), so the response does not depend on `reference_axis`: the twist center of the swept wings is found the same way (the position at which the rotations about the normal and span axes under the unit moments are reciprocal), which for the S10 Baseline is at 0.449 of the chord for every reference axis.
+Generalized displacements of the nodes of a discretized beam of the swept Technion Pazy wing with `sweep` degrees of sweep (S10, S20), `version` = "LE", "TE" or "Baseline", under the six unit loads at the end of the beam axis, from the job of `nastran_pazy_swept_static_response` (which is generated and run if needed, so no extra Nastran run is required): the rigid body motion of each section, fitted to the displacements of all the spar grids at that y and referred to the point of the axis there (extractStations.py, as in `nastran_pazy_station_response`). `y` are the spanwise positions (y of the Nastran model) of the nodes, from the root to the end of the spar, e.g. `[x[2] for x in spar_reference_axis(read_gfem(bdf), :nominal; reference_axis, sweep)]`, which must be at rows of grids of the spar (within `tol`). The sections are those of constant y, so the nodes are at the distances `(y .- y[1]) ./ cosd(sweep)` from the root along the inclined axis. No file is written: the script prints the response (see `read_extracted_csv`). The rotation about the chord axis of the sections is taken at the twist center, as in `nastran_pazy_station_response` (`twist_center` = `:auto`, the default, a fraction of the chord or `:axis`), so the response does not depend on `reference_axis`: the twist center of the swept wings is found the same way (the position at which the rotations about the normal and span axes under the unit moments are reciprocal), which for the S10 Baseline is at 0.449 of the chord for every reference axis.
 
 Returns `(T, L)`: `T` is a vector with the (6 x 6) generalized displacements of each node, in the beam frame rotated by `sweep` about z (as in `nastran_pazy_swept_static_response`), rows = [u; θ] and columns = load cases [F1, F2, F3, M1, M2, M3] (zeros at the clamped root), and `L` is the length of the beam axis [m].
 """
-function nastran_pazy_swept_station_response(sweep::Real, version::AbstractString, y::AbstractVector{<:Real}; reference_axis::Real, nodes_distribution, tol::Real=1e-5, twist_center::Union{Symbol,Real}=:auto, tip::Symbol=:rigid)
+function nastran_pazy_swept_station_response(sweep::Real, version::AbstractString, y::AbstractVector{<:Real}; reference_axis::Real, tol::Real=1e-5, twist_center::Union{Symbol,Real}=:auto, tip::Symbol=:rigid)
     twist_center isa Real || twist_center in (:auto, :axis) || throw(ArgumentError("twist_center must be :auto, :axis or a fraction of the chord, got $twist_center"))
     python, nastranDir, caseDir, name = pazy_swept_dirs(sweep, version)
     _, L = nastran_pazy_swept_static_response(sweep, version; reference_axis, tip)
     job = "$(name)_$(pazy_reference_axis_tag(reference_axis))_static$(pazy_tip_suffix(tip))"
-    nodesTag = pazy_nodes_distribution_tag(nodes_distribution)
 
-    run(`$python $(joinpath(nastranDir, "extractStations.py")) $caseDir --job $job --stations $y --tol $tol --tag $nodesTag --twist-center $twist_center`)
-
-    Tall = readdlm(joinpath(caseDir, "$job.station_response_section_$nodesTag.csv"), ',')
+    Tall = read_extracted_csv(`$python $(joinpath(nastranDir, "extractStations.py")) $caseDir --job $job --stations $y --tol $tol --twist-center $twist_center`)
     T = [Tall[6*(k-1)+1:6*k, :] for k in eachindex(y)]
 
     return T, L
@@ -525,31 +524,27 @@ function nastran_pazy_swept_no_rod_static_response(sweep::Real, version::Abstrac
 
     run(`$python $(joinpath(nastranDir, "generatePazy.py")) --bdf $bdf --no-rod --analyses static --sweep $sweep --tag $tag --chord-fraction $reference_axis`)
     run_pazy_nastran(python, nastranDir, caseDir, job)
-    run(`$python $(joinpath(nastranDir, "extractResponse.py")) $caseDir --job $job`)
 
     L = parse(Float64, match(r"\"L\":\s*([-+0-9.eE]+)", read(joinpath(caseDir, "$job.meta.json"), String)).captures[1])
-    T = readdlm(joinpath(caseDir, "$job.response.csv"), ',')
+    T = read_extracted_csv(`$python $(joinpath(nastranDir, "extractResponse.py")) $caseDir --job $job`)
 
     return T, L
 end
 
 """
-    nastran_pazy_swept_no_rod_station_response(sweep, version, y; reference_axis, nodes_distribution, tol=1e-5, twist_center=:auto)
+    nastran_pazy_swept_no_rod_station_response(sweep, version, y; reference_axis, tol=1e-5, twist_center=:auto)
 
-Generalized displacements of the nodes of a discretized beam of the swept Technion Pazy wing without the tip rod, as `nastran_pazy_swept_station_response` (from the job of `nastran_pazy_swept_no_rod_static_response`, which is generated and run if needed). Its output is S<sweep>_<version>_norod_RA<x>_static.station_response_section_ND<y>.csv.
+Generalized displacements of the nodes of a discretized beam of the swept Technion Pazy wing without the tip rod, as `nastran_pazy_swept_station_response` (from the job of `nastran_pazy_swept_no_rod_static_response`, which is generated and run if needed). No file is written.
 
 Returns `(T, L)`, as in `nastran_pazy_swept_station_response`.
 """
-function nastran_pazy_swept_no_rod_station_response(sweep::Real, version::AbstractString, y::AbstractVector{<:Real}; reference_axis::Real, nodes_distribution, tol::Real=1e-5, twist_center::Union{Symbol,Real}=:auto)
+function nastran_pazy_swept_no_rod_station_response(sweep::Real, version::AbstractString, y::AbstractVector{<:Real}; reference_axis::Real, tol::Real=1e-5, twist_center::Union{Symbol,Real}=:auto)
     twist_center isa Real || twist_center in (:auto, :axis) || throw(ArgumentError("twist_center must be :auto, :axis or a fraction of the chord, got $twist_center"))
     python, nastranDir, caseDir, name = pazy_swept_no_rod_dirs(sweep, version)
     _, L = nastran_pazy_swept_no_rod_static_response(sweep, version; reference_axis)
     job = "$(name)_$(pazy_reference_axis_tag(reference_axis))_static"
-    nodesTag = pazy_nodes_distribution_tag(nodes_distribution)
 
-    run(`$python $(joinpath(nastranDir, "extractStations.py")) $caseDir --job $job --stations $y --tol $tol --tag $nodesTag --twist-center $twist_center`)
-
-    Tall = readdlm(joinpath(caseDir, "$job.station_response_section_$nodesTag.csv"), ',')
+    Tall = read_extracted_csv(`$python $(joinpath(nastranDir, "extractStations.py")) $caseDir --job $job --stations $y --tol $tol --twist-center $twist_center`)
     T = [Tall[6*(k-1)+1:6*k, :] for k in eachindex(y)]
 
     return T, L
@@ -612,11 +607,11 @@ function pazy_no_rod_dirs()
 end
 
 """
-    pazy_no_rod_mass_model_file(; reference_axis, nodes_distribution) -> String
+    pazy_no_rod_mass_model_file(; reference_axis, mesh) -> String
 
-Path of the CSV file with the equivalent beam mass model of the Technion Pazy wing without the tip rod for the given reference axis (chord fraction) and nodes distribution (see `pazy_beam_mass_model`), which is nastran/Pazy_Technion/S0_norod/S0_norod_RA<x>_ND<y>_beam_mass_model.csv.
+Path of the CSV file with the equivalent beam mass model of the Technion Pazy wing without the tip rod for the given reference axis and mesh (see `pazy_beam_mass_model`), which is nastran/Pazy_Technion/S0_norod/S0_norod_RA<x>_inertia_matrices_<mesh>.csv (see `pazy_mesh_tag`).
 """
-pazy_no_rod_mass_model_file(; reference_axis::Real, nodes_distribution) = joinpath(@__DIR__, PAZY_NO_ROD_DIR, "$(PAZY_NO_ROD_NAME)_$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))_beam_mass_model.csv")
+pazy_no_rod_mass_model_file(; reference_axis::Real, mesh) = joinpath(@__DIR__, PAZY_NO_ROD_DIR, "$(PAZY_NO_ROD_NAME)_$(pazy_reference_axis_tag(reference_axis))_inertia_matrices_$(pazy_mesh_tag(mesh)).csv")
 
 """
     pazy_no_rod_stiffness_file(; reference_axis) -> String
@@ -626,11 +621,11 @@ Path of the CSV file with the global stiffness matrix of the Technion Pazy wing 
 pazy_no_rod_stiffness_file(; reference_axis::Real) = joinpath(@__DIR__, PAZY_NO_ROD_DIR, "$(PAZY_NO_ROD_NAME)_$(pazy_reference_axis_tag(reference_axis))_stiffness_matrix.csv")
 
 """
-    pazy_no_rod_least_squares_stiffness_file(; reference_axis, nodes_distribution, segments) -> String
+    pazy_no_rod_least_squares_stiffness_file(; reference_axis, mesh, segments) -> String
 
-Path of the CSV file with the stiffness matrices of the Technion Pazy wing without the tip rod fitted by `least_squares_stiffness_matrices` (see `pazy_least_squares_stiffness_file`), which is nastran/Pazy_Technion/S0_norod/S0_norod_RA<x>_ND<y>_least_squares_stiffness_matrices_<segments>.csv.
+Path of the CSV file with the stiffness matrices of the Technion Pazy wing without the tip rod fitted by `least_squares_stiffness_matrices` (see `pazy_least_squares_stiffness_file`), which is nastran/Pazy_Technion/S0_norod/S0_norod_RA<x>_stiffness_matrices_<mesh>.csv (see `pazy_mesh_tag`), and `_global` or `_ends` after it for those `segments` (see `pazy_segments_suffix`).
 """
-pazy_no_rod_least_squares_stiffness_file(; reference_axis::Real, nodes_distribution, segments::Symbol) = joinpath(@__DIR__, PAZY_NO_ROD_DIR, "$(PAZY_NO_ROD_NAME)_$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))_least_squares_stiffness_matrices_$segments.csv")
+pazy_no_rod_least_squares_stiffness_file(; reference_axis::Real, mesh, segments::Symbol) = joinpath(@__DIR__, PAZY_NO_ROD_DIR, "$(PAZY_NO_ROD_NAME)_$(pazy_reference_axis_tag(reference_axis))_stiffness_matrices_$(pazy_mesh_tag(mesh))$(pazy_segments_suffix(segments)).csv")
 
 """
     nastran_pazy_no_rod_static_response(; reference_axis)
@@ -649,31 +644,27 @@ function nastran_pazy_no_rod_static_response(; reference_axis::Real)
 
     run(`$python $(joinpath(nastranDir, "generatePazy.py")) --bdf $bdf --no-rod --sweep $PAZY_STRAIGHT_SWEEP --analyses static --tag $tag --chord-fraction $reference_axis`)
     run_pazy_nastran(python, nastranDir, caseDir, job)
-    run(`$python $(joinpath(nastranDir, "extractResponse.py")) $caseDir --job $job`)
 
     L = parse(Float64, match(r"\"L\":\s*([-+0-9.eE]+)", read(joinpath(caseDir, "$job.meta.json"), String)).captures[1])
-    T = readdlm(joinpath(caseDir, "$job.response.csv"), ',')
+    T = read_extracted_csv(`$python $(joinpath(nastranDir, "extractResponse.py")) $caseDir --job $job`)
 
     return T, L
 end
 
 """
-    nastran_pazy_no_rod_station_response(y; reference_axis, nodes_distribution, tol=1e-5, twist_center=:auto)
+    nastran_pazy_no_rod_station_response(y; reference_axis, tol=1e-5, twist_center=:auto)
 
-Generalized displacements of the nodes of a discretized beam of the Technion Pazy wing without the tip rod, under the six unit loads at the end of the reference axis, from the job of `nastran_pazy_no_rod_static_response` (which is generated and run if needed, so no extra Nastran run is required). `y`, `nodes_distribution`, `tol` and `twist_center` are as in `nastran_pazy_station_response`, and its output is S0_norod_RA<x>_static.station_response_section_ND<y>.csv.
+Generalized displacements of the nodes of a discretized beam of the Technion Pazy wing without the tip rod, under the six unit loads at the end of the reference axis, from the job of `nastran_pazy_no_rod_static_response` (which is generated and run if needed, so no extra Nastran run is required). `y`, `tol` and `twist_center` are as in `nastran_pazy_station_response`, and no file is written.
 
 Returns `(T, L)`, as in `nastran_pazy_station_response`.
 """
-function nastran_pazy_no_rod_station_response(y::AbstractVector{<:Real}; reference_axis::Real, nodes_distribution, tol::Real=1e-5, twist_center::Union{Symbol,Real}=:auto)
+function nastran_pazy_no_rod_station_response(y::AbstractVector{<:Real}; reference_axis::Real, tol::Real=1e-5, twist_center::Union{Symbol,Real}=:auto)
     twist_center isa Real || twist_center in (:auto, :axis) || throw(ArgumentError("twist_center must be :auto, :axis or a fraction of the chord, got $twist_center"))
     python, nastranDir, caseDir = pazy_no_rod_dirs()
     _, L = nastran_pazy_no_rod_static_response(; reference_axis)
     job = "$(PAZY_NO_ROD_NAME)_$(pazy_reference_axis_tag(reference_axis))_static"
-    nodesTag = pazy_nodes_distribution_tag(nodes_distribution)
 
-    run(`$python $(joinpath(nastranDir, "extractStations.py")) $caseDir --job $job --stations $y --tol $tol --tag $nodesTag --twist-center $twist_center`)
-
-    Tall = readdlm(joinpath(caseDir, "$job.station_response_section_$nodesTag.csv"), ',')
+    Tall = read_extracted_csv(`$python $(joinpath(nastranDir, "extractStations.py")) $caseDir --job $job --stations $y --tol $tol --twist-center $twist_center`)
     T = [Tall[6*(k-1)+1:6*k, :] for k in eachindex(y)]
 
     return T, L
@@ -716,4 +707,130 @@ function nastran_pazy_no_rod_modal_files(; nmodes::Integer=15)
     run(`$python $(joinpath(nastranDir, "extractModeShapes.py")) $caseDir --job $job --nmodes $nmodes --name $shapes`)
 
     return [joinpath(caseDir, "$(PAZY_NO_ROD_NAME)_modal_frequencies.csv"), joinpath(caseDir, "$(shapes)_wing.csv")]
+end
+
+# ------------------------------------------------------------------------------------------------------------
+# Delft Pazy wing (nastran/Pazy_Delft/pazy_delft.bdf, another FEM of the wing, unswept, like the Technion S0 but without its two ribs close to the root): spar PSHELL 3, tip rod PBEAM 13 tied by RBE2 to the end section of the wing (spar and skin), 17 ribs PSHELL 4 and 10, skin PSHELL 10011 (12 micron, as the Technion S0) and stringers PBEAM 1 and 2 with the roll tied to the spar at the ribs (tieStringerRoll.py --spar-pid 3)
+# ------------------------------------------------------------------------------------------------------------
+
+const PAZY_DELFT_DIR = "Pazy_Delft" # folder of the model and of its Nastran files
+const PAZY_DELFT_NAME = "pazy_delft" # name of the base .bdf, prefix of the outputs and of the Nastran jobs
+const PAZY_DELFT_SPAR_PID = 3
+const PAZY_DELFT_ROD_PID = 13
+const PAZY_DELFT_RIB_PIDS = (4, 10)
+const PAZY_DELFT_SKIP_ROOT = 0 # no ribs close to the root to lump in the root node
+const PAZY_DELFT_SKIP_TIP = 3 # the last 3 of the 4 ribs close to the tip are lumped in the tip node (as in the Technion S0)
+
+"""
+    pazy_delft_bdf() -> String
+
+Path of the base .bdf (bulk data only) of the Delft Pazy wing, nastran/Pazy_Delft/pazy_delft.bdf.
+"""
+pazy_delft_bdf() = joinpath(@__DIR__, PAZY_DELFT_DIR, "$(PAZY_DELFT_NAME).bdf")
+
+function pazy_delft_dirs()
+    python, nastranDir, _ = pazy_python_and_dirs()
+    return python, nastranDir, joinpath(nastranDir, PAZY_DELFT_DIR)
+end
+
+"""
+    pazy_delft_spar_reference_axis(mesh; reference_axis, sweep=PAZY_STRAIGHT_SWEEP) -> Vector{Vector{Float64}}
+
+Beam nodes along the reference axis of the spar of the Delft Pazy wing (see `spar_reference_axis`), with the spar PSHELL 3 and the ribs PSHELL 4 and 10. The `:nominal` mesh has the root, the first 14 ribs and the tip of the spar (15 elements, the last one with the 4 ribs close to the tip), and `:refined` adds a node in each element but the last.
+"""
+function pazy_delft_spar_reference_axis(mesh; reference_axis::Real, sweep::Real=PAZY_STRAIGHT_SWEEP)
+    return spar_reference_axis(read_gfem(pazy_delft_bdf()), mesh; reference_axis, sweep, spar_pid=PAZY_DELFT_SPAR_PID, rib_pids=PAZY_DELFT_RIB_PIDS, skip_root=PAZY_DELFT_SKIP_ROOT, skip_tip=PAZY_DELFT_SKIP_TIP)
+end
+
+"""
+    pazy_delft_beam_mass_model(; nodes, reference_axis, sweep=PAZY_STRAIGHT_SWEEP, kwargs...)
+
+Equivalent beam mass model of the Delft Pazy wing (see `pazy_beam_mass_model`) with the nodes of `pazy_delft_spar_reference_axis`.
+"""
+function pazy_delft_beam_mass_model(; nodes, reference_axis::Real, sweep::Real=PAZY_STRAIGHT_SWEEP, kwargs...)
+    return pazy_beam_mass_model(pazy_delft_bdf(); nodes, reference_axis, sweep, spar_pid=PAZY_DELFT_SPAR_PID, rib_pids=PAZY_DELFT_RIB_PIDS, skip_root=PAZY_DELFT_SKIP_ROOT, skip_tip=PAZY_DELFT_SKIP_TIP, kwargs...)
+end
+
+"""
+    pazy_delft_mass_model_file(; reference_axis, mesh) -> String
+
+Path of the CSV file with the equivalent beam mass model of the Delft Pazy wing for the given reference axis (chord fraction) and mesh, which is nastran/Pazy_Delft/pazy_delft_RA<x>_inertia_matrices_<mesh>.csv (see `pazy_mesh_tag`).
+"""
+pazy_delft_mass_model_file(; reference_axis::Real, mesh) = joinpath(@__DIR__, PAZY_DELFT_DIR, "$(PAZY_DELFT_NAME)_$(pazy_reference_axis_tag(reference_axis))_inertia_matrices_$(pazy_mesh_tag(mesh)).csv")
+
+"""
+    pazy_delft_stiffness_file(; reference_axis, tip=:rigid) -> String
+
+Path of the CSV file with the global stiffness matrix of the Delft Pazy wing for the given reference axis (chord fraction) and tip rod (see `pazy_tip_suffix`), which is nastran/Pazy_Delft/pazy_delft_RA<x>_stiffness_matrix<suffix>.csv.
+"""
+pazy_delft_stiffness_file(; reference_axis::Real, tip::Symbol=:rigid) = joinpath(@__DIR__, PAZY_DELFT_DIR, "$(PAZY_DELFT_NAME)_$(pazy_reference_axis_tag(reference_axis))_stiffness_matrix$(pazy_tip_suffix(tip)).csv")
+
+"""
+    pazy_delft_least_squares_stiffness_file(; reference_axis, mesh, segments, tip=:rigid) -> String
+
+Path of the CSV file with the stiffness matrices of the Delft Pazy wing fitted by `least_squares_stiffness_matrices` (see `pazy_least_squares_stiffness_file`), which is nastran/Pazy_Delft/pazy_delft_RA<x>_stiffness_matrices_<mesh><suffix><segments suffix>.csv.
+"""
+pazy_delft_least_squares_stiffness_file(; reference_axis::Real, mesh, segments::Symbol, tip::Symbol=:rigid) = joinpath(@__DIR__, PAZY_DELFT_DIR, "$(PAZY_DELFT_NAME)_$(pazy_reference_axis_tag(reference_axis))_stiffness_matrices_$(pazy_mesh_tag(mesh))$(pazy_tip_suffix(tip))$(pazy_segments_suffix(segments)).csv")
+
+"""
+    nastran_pazy_delft_static_response(; reference_axis, tip=:rigid)
+
+Static Nastran workflow for the Delft Pazy wing (nastran/Pazy_Delft/pazy_delft.bdf), as `nastran_pazy_static_response` for the Technion wing: generatePazy.py with the spar PSHELL 3 and the tip rod PBEAM 13, runs Nastran (runNastran.py) and extracts the response (extractResponse.py). Files are kept in nastran/Pazy_Delft, named pazy_delft_RA<x>_static<suffix>.* (see `pazy_tip_suffix`).
+
+Returns `(T, L)`, as in `nastran_pazy_static_response`.
+
+If Nastran is not available on this machine, an error is raised after listing the .bdf to run elsewhere (e.g. on a Windows VM, with `python nastran/runNastran.py "nastran/Pazy_Delft" --jobs pazy_delft_RA0p47_static_rigidtip`). Copy the .op2 file back to that directory and call this function again. The Python interpreter is the project's `.venv` unless the BEAMROM_PYTHON environment variable is set.
+"""
+function nastran_pazy_delft_static_response(; reference_axis::Real, tip::Symbol=:rigid)
+    python, nastranDir, caseDir = pazy_delft_dirs()
+    tag = pazy_reference_axis_tag(reference_axis)
+    job = "$(PAZY_DELFT_NAME)_$(tag)_static" * pazy_tip_suffix(tip)
+
+    run(`$python $(joinpath(nastranDir, "generatePazy.py")) --bdf $(pazy_delft_bdf()) --spar-pid $PAZY_DELFT_SPAR_PID --rod-pid $PAZY_DELFT_ROD_PID --sweep $PAZY_STRAIGHT_SWEEP --analyses static --tag $tag --chord-fraction $reference_axis --tip $tip`)
+    run_pazy_nastran(python, nastranDir, caseDir, job)
+
+    L = parse(Float64, match(r"\"L\":\s*([-+0-9.eE]+)", read(joinpath(caseDir, "$job.meta.json"), String)).captures[1])
+    T = read_extracted_csv(`$python $(joinpath(nastranDir, "extractResponse.py")) $caseDir --job $job`)
+
+    return T, L
+end
+
+"""
+    nastran_pazy_delft_station_response(y; reference_axis, tol=1e-5, twist_center=:auto, tip=:rigid)
+
+Generalized displacements of the nodes of a discretized beam of the Delft Pazy wing under the six unit loads at the end of the reference axis, from the job of `nastran_pazy_delft_static_response` (generated and run if needed). `y`, `tol`, `twist_center` and the returned values are as in `nastran_pazy_station_response`; the spar grids at each station are those of PSHELL 3 (extractStations.py --spar-pid), and no file is written.
+"""
+function nastran_pazy_delft_station_response(y::AbstractVector{<:Real}; reference_axis::Real, tol::Real=1e-5, twist_center::Union{Symbol,Real}=:auto, tip::Symbol=:rigid)
+    twist_center isa Real || twist_center in (:auto, :axis) || throw(ArgumentError("twist_center must be :auto, :axis or a fraction of the chord, got $twist_center"))
+    python, nastranDir, caseDir = pazy_delft_dirs()
+    _, L = nastran_pazy_delft_static_response(; reference_axis, tip)
+    job = "$(PAZY_DELFT_NAME)_$(pazy_reference_axis_tag(reference_axis))_static" * pazy_tip_suffix(tip)
+
+    Tall = read_extracted_csv(`$python $(joinpath(nastranDir, "extractStations.py")) $caseDir --job $job --stations $y --tol $tol --twist-center $twist_center --spar-pid $PAZY_DELFT_SPAR_PID`)
+    T = [Tall[6*(k-1)+1:6*k, :] for k in eachindex(y)]
+
+    return T, L
+end
+
+"""
+    nastran_pazy_delft_modal_response(; nd=10, tip=:flexible)
+
+Modal Nastran workflow for the Delft Pazy wing (nastran/Pazy_Delft/pazy_delft.bdf): generates the modal BDF (generatePazy.py, with the tip rod PBEAM 13 rigid or flexible, see `pazy_tip_suffix`), runs Nastran and extracts the eigenvalues (extractModes.py) to pazy_delft_modal_frequencies<suffix>.csv. Files are kept in nastran/Pazy_Delft. `nd` is the number of modes requested.
+
+Returns `(λ, L)`, as in `nastran_pazy_modal_response`.
+
+If Nastran is not available on this machine, an error is raised after listing the .bdf to run elsewhere (e.g. on a Windows VM, with `python nastran/runNastran.py "nastran/Pazy_Delft" --jobs pazy_delft_modal_flextip`). Copy the .op2 file back to that directory and call this function again. The Python interpreter is the project's `.venv` unless the BEAMROM_PYTHON environment variable is set.
+"""
+function nastran_pazy_delft_modal_response(; nd::Integer=10, tip::Symbol=:flexible)
+    python, nastranDir, caseDir = pazy_delft_dirs()
+    job = "$(PAZY_DELFT_NAME)_modal" * pazy_tip_suffix(tip)
+    frequencies = "$(PAZY_DELFT_NAME)_modal_frequencies$(pazy_tip_suffix(tip)).csv"
+
+    run(`$python $(joinpath(nastranDir, "generatePazy.py")) --bdf $(pazy_delft_bdf()) --spar-pid $PAZY_DELFT_SPAR_PID --rod-pid $PAZY_DELFT_ROD_PID --sweep $PAZY_STRAIGHT_SWEEP --analyses modal --nd $nd --tip $tip`)
+    run_pazy_nastran(python, nastranDir, caseDir, job)
+    run(`$python $(joinpath(nastranDir, "extractModes.py")) $caseDir --job $job --out $frequencies`)
+
+    L = parse(Float64, match(r"\"L\":\s*([-+0-9.eE]+)", read(joinpath(caseDir, "$job.json"), String)).captures[1])
+
+    return readdlm(joinpath(caseDir, frequencies), ',')[:, 2], L
 end

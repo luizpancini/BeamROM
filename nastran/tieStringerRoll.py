@@ -1,12 +1,14 @@
 """Ties the roll of the leading and trailing edge stringers of the Technion Pazy wing models to the spar at the ribs.
 
-Usage:  python tieStringerRoll.py file.bdf [file2.bdf ...]
+Usage:  python tieStringerRoll.py file.bdf [file2.bdf ...] [--spar-pid 100003]
+
+`--spar-pid` is the property of the shell elements of the spar (3 in the Delft model).
 
 The stringers (CBEAM of properties 1, leading edge, and 2, trailing edge) are connected to the rest of the model only by the 12 micron skin and, at each rib, by one vertex of the shell of the rib (properties 4 and 10, in planes of constant y), whose rotation about the normal of the rib (the span direction y, the drilling rotation of the shell, which has almost no stiffness) is the roll of the stringer. The stringers could then roll freely relative to the sections of the wing, which gives local modes of the stringers and lowers the torsion frequencies by up to 40% relative to the equivalent beam, whose sections are rigid. The cards added here tie that rotation at each rib to the rotation of the grid of the edge of the spar (minimum x for the leading edge and maximum x for the trailing edge) at the same y: one RBE2 for each grid of the stringer shared with the shell of a rib, with only the rotation about y (component 5, in the basic frame, in which all grids are defined) dependent. The stringers can still roll between the ribs, but not at them, as if the stringers were part of the ribs. The static response does not change (the roll of the stringers follows the twist of the section), and neither do the stiffness and inertia matrices of the equivalent beam, which come from the static analysis and from the mass of the model.
 
-The models are edited in place: the cards are added before ENDDATA (or at the end of the file, if it has none), after a comment line that is also the mark of the models that already have them, so that the script can be repeated. The ids of the RBE2 follow the highest id of the elements and rigid elements of the model. `tie_stringer_roll(lines)` does the same on the lines of the bulk data, for prepareSweptPazy.py.
+The models are edited in place: the cards are added before ENDDATA (or at the end of the file, if it has none), after a comment line that is also the mark of the models that already have them, so that the script can be repeated. The ids of the RBE2 follow the highest id of the elements and rigid elements of the model. `tie_stringer_roll(lines, spar_pid)` does the same on the lines of the bulk data, for prepareSweptPazy.py.
 """
-import sys
+import argparse
 import tempfile
 from pathlib import Path
 
@@ -60,27 +62,28 @@ def roll_ties(model, spar_pid=SPAR_PID):
     return pairs
 
 
-def tie_stringer_roll(lines):
+def tie_stringer_roll(lines, spar_pid=SPAR_PID):
     """Lines of the bulk data with the RBE2 of the roll of the stringers added at the end (unchanged if it has them). Returns the lines and the number of RBE2 added."""
     if any(line.strip() == MARK for line in lines):
         return lines, 0
     model = read_lines(lines)
-    pairs = roll_ties(model)
+    pairs = roll_ties(model, spar_pid)
     eid = max(max(model.rigid_elements, default=0), max(model.elements)) + 1
     cards = [MARK] + [f"RBE2    {eid + k:8d}{master:8d}{ROLL_DOF:>8}{n:8d}" for k, (_, master, n) in enumerate(pairs)]
     return list(lines) + cards, len(pairs)
 
 
 def main():
-    if len(sys.argv) < 2:
-        sys.exit(__doc__)
-    for name in sys.argv[1:]:
-        path = Path(name)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("bdf", nargs="+", type=Path)
+    parser.add_argument("--spar-pid", type=int, default=SPAR_PID, help="property of the shell elements of the spar")
+    args = parser.parse_args()
+    for path in args.bdf:
         lines = path.read_text().split("\n")
         if lines and lines[-1] == "":
             lines.pop()
         end = next((k for k, line in enumerate(lines) if line.strip().upper().startswith("ENDDATA")), len(lines))
-        new, count = tie_stringer_roll(lines[:end])
+        new, count = tie_stringer_roll(lines[:end], args.spar_pid)
         if not count:
             print(f"{path}: already has the ties")
             continue

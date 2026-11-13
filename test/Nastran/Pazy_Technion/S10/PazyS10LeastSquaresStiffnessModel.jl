@@ -12,9 +12,9 @@ version = "Baseline"
 # Position of the reference axis, as a fraction of the chord (the same along the span, so that the axis is inclined by the sweep angle).
 reference_axis = 0.447
 
-# Beam node distribution: :ribs places the nodes at the root, at the ribs (the first 2 ribs, close to the root, are lumped in the root node, and the last 3 of the 4 close to the tip are lumped in the tip node) and at the tip of the spar. :ribs_halved adds a node at the middle of each segment of :ribs, except the last one (twice as many elements, minus one). An integer gives that number of equally spaced nodes (e.g. 16) and a vector gives fractions of the span
-# Each combination of reference_axis and nodes_distribution is saved in its own file (S10_<version>_RA<reference_axis>_ND<nodes_distribution>_beam_mass_model.csv)
-meshes = [:ribs, :ribs_halved]
+# Beam mesh: :nominal places the nodes at the root, at the ribs (the first 2 ribs, close to the root, are lumped in the root node, and the last 3 of the 4 close to the tip are lumped in the tip node) and at the tip of the spar. :refined adds a node at the middle of each segment of :nominal, except the last one (twice as many elements, minus one). An integer gives that number of equally spaced nodes (e.g. 16) and a vector gives fractions of the span
+# Each combination of reference axis, mesh, tip and segments is saved in its own file (S10_<version>_RA<reference_axis>_stiffness_matrices_<nominal|refined>mesh_<flex|rigid>tip.csv, with the version in lower case and _global or _ends at the end for those segments)
+meshes = [:nominal, :refined]
 
 # Tip rod of the Nastran model: :rigid (the rod, property 13, is made of a rigid nylon, so the tip section of the wing is, as the stiffness matrices require) or :flexible (the rod of the model, which bends). The results of each have the suffix _rigidtip or _flextip in their file names (see pazy_tip_suffix)
 tips = [:flexible, :rigid]
@@ -42,7 +42,7 @@ for mesh in meshes
             xref = spar_reference_axis(read_gfem(bdf), mesh; reference_axis, sweep)
             y = [x[2] for x in xref]
             x1 = (y .- y[1]) ./ cosd(sweep)
-            T, L = nastran_pazy_swept_station_response(sweep, version, y; reference_axis, nodes_distribution=mesh, tip)
+            T, L = nastran_pazy_swept_station_response(sweep, version, y; reference_axis, tip)
 
             # Least squares stiffness matrices
             breaks = if segments == :nodes
@@ -56,7 +56,7 @@ for mesh in meshes
             S = fit.S
 
             # Save the stiffness matrices next to the Nastran files, with the coordinates of the ends of the segments along the axis, from the root
-            write_discretized_stiffness_csv(pazy_swept_least_squares_stiffness_file(sweep, version; reference_axis, nodes_distribution=mesh, segments, tip), breaks, S)
+            write_discretized_stiffness_csv(pazy_swept_least_squares_stiffness_file(sweep, version; reference_axis, mesh, segments, tip), breaks, S)
 
             # Print summary
             @printf("S10 %s least squares stiffness matrices (%s, %s tip): length of the beam axis L = %.6f m, %d nodes, %d segments, %d iterations\n", version, segments, tip, L, length(y), length(S), fit.iterations)

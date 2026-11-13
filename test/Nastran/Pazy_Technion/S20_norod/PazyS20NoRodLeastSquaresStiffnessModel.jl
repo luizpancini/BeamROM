@@ -12,9 +12,9 @@ version = "Baseline"
 # Position of the reference axis, as a fraction of the chord (the same along the span, so that the axis is inclined by the sweep angle).
 reference_axis = 0.4565
 
-# Beam node distribution: :ribs places the nodes at the root, at the ribs (the first 2 ribs, close to the root, are lumped in the root node, and the last 3 of the 4 close to the tip are lumped in the tip node) and at the tip of the spar. :ribs_halved adds a node at the middle of each segment of :ribs, except the last one (twice as many elements, minus one). An integer gives that number of equally spaced nodes (e.g. 16) and a vector gives fractions of the span
-# Each combination of reference_axis and nodes_distribution is saved in its own file (S20_<version>_norod_RA<reference_axis>_ND<nodes_distribution>_least_squares_stiffness_matrices_<segments>.csv)
-meshes = [:ribs, :ribs_halved]
+# Beam mesh: :nominal places the nodes at the root, at the ribs (the first 2 ribs, close to the root, are lumped in the root node, and the last 3 of the 4 close to the tip are lumped in the tip node) and at the tip of the spar. :refined adds a node at the middle of each segment of :nominal, except the last one (twice as many elements, minus one). An integer gives that number of equally spaced nodes (e.g. 16) and a vector gives fractions of the span
+# Each combination of reference axis, mesh and segments is saved in its own file (S20_<version>_norod_RA<reference_axis>_stiffness_matrices_<nominal|refined>mesh.csv, with the version in lower case and _global or _ends at the end for those segments)
+meshes = [:nominal, :refined]
 
 # Segments: :nodes = one stiffness matrix for each segment between consecutive beam nodes; :global = a single one for the whole beam, fitted to all the nodes; :ends = one stiffness matrix for each of the two elements of the end segments (root and tip) and a single one for the middle segment, for a total of five segments
 segments = [:nodes, :global, :ends]
@@ -38,7 +38,7 @@ for mesh in meshes
         xref = spar_reference_axis(read_gfem(bdf), mesh; reference_axis, sweep)
         y = [x[2] for x in xref]
         x1 = (y .- y[1]) ./ cosd(sweep)
-        T, L = nastran_pazy_swept_no_rod_station_response(sweep, version, y; reference_axis, nodes_distribution=mesh)
+        T, L = nastran_pazy_swept_no_rod_station_response(sweep, version, y; reference_axis)
 
         # Least squares stiffness matrices
         breaks = if segments == :nodes
@@ -52,7 +52,7 @@ for mesh in meshes
         S = fit.S
 
         # Save the stiffness matrices next to the Nastran files, with the coordinates of the ends of the segments along the axis, from the root
-        write_discretized_stiffness_csv(pazy_swept_no_rod_least_squares_stiffness_file(sweep, version; reference_axis, nodes_distribution=mesh, segments), breaks, S)
+        write_discretized_stiffness_csv(pazy_swept_no_rod_least_squares_stiffness_file(sweep, version; reference_axis, mesh, segments), breaks, S)
 
         # Print summary
         @printf("S20 %s least squares stiffness matrices (%s): length of the beam axis L = %.6f m, %d nodes, %d segments, %d iterations\n", version, segments, L, length(y), length(S), fit.iterations)

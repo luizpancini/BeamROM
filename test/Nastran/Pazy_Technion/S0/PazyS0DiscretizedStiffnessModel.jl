@@ -9,26 +9,26 @@ sweep = 0
 # Position of the reference axis, as a fraction of the chord
 reference_axis = 0.4653
 
-# Beam node distribution: :ribs places the nodes at the root, at the ribs (the first 2 ribs, close to the root, are lumped in the root node, and the last 3 of the 4 close to the tip are lumped in the tip node) and at the tip of the spar. :ribs_halved adds a node at the middle of each segment of :ribs, except the last one (twice as many elements, minus one). An integer gives that number of equally spaced nodes (e.g. 16) and a vector gives fractions of the span
-# Each combination of reference_axis and nodes_distribution is saved in its own file (S0_RA<reference_axis>_ND<nodes_distribution>_beam_mass_model.csv)
-nodes_distribution = :ribs_halved
+# Beam mesh: :nominal places the nodes at the root, at the ribs (the first 2 ribs, close to the root, are lumped in the root node, and the last 3 of the 4 close to the tip are lumped in the tip node) and at the tip of the spar. :refined adds a node at the middle of each segment of :nominal, except the last one (twice as many elements, minus one). An integer gives that number of equally spaced nodes (e.g. 16) and a vector gives fractions of the span
+# Each combination of reference axis, mesh and tip is saved in its own file (S0_RA<reference_axis>_discretized_stiffness_matrices_<nominal|refined>mesh_<flex|rigid>tip.csv)
+mesh = :refined
 
 # Tip rod of the Nastran model: :rigid (the rod is rigid, so the tip section of the wing is, as the stiffness matrices require) or :flexible (the rod of the model, which bends). The results of each have the suffix _rigidtip or _flextip in their file names (see pazy_tip_suffix)
 tip = :rigid
 
 # Get the beam nodes of the mass model and the generalized displacements of each one under the six load cases
 bdf = joinpath(pkgdir(BeamROM), "nastran", "Pazy_Technion", "S0", "S0.bdf")
-xref = spar_reference_axis(read_gfem(bdf), nodes_distribution; reference_axis, sweep)
+xref = spar_reference_axis(read_gfem(bdf), mesh; reference_axis, sweep)
 y = [x[2] for x in xref]
 nodes = length(y)
-T, L = nastran_pazy_station_response(y; reference_axis, nodes_distribution, tip)
+T, L = nastran_pazy_station_response(y; reference_axis, tip)
 
 # Compute the stiffness matrix of each segment
 S = discretized_stiffness_matrices(y=y, T=T)
 
 # Save the stiffness matrices next to the Nastran files, with the beam node coordinates relative to the first node (the root of the spar axis)
 y0 = y .- y[1]
-write_discretized_stiffness_csv(pazy_discretized_stiffness_file(; reference_axis, nodes_distribution, tip), y0, S)
+write_discretized_stiffness_csv(pazy_discretized_stiffness_file(; reference_axis, mesh, tip), y0, S)
 
 # Stiffness matrix of the whole beam, from the generalized displacements of the last node, and of the spar alone (60 x 2.25 mm aluminum plate, see OneDBeamNastran.jl for the correction factors), as references
 Tend = T[end]

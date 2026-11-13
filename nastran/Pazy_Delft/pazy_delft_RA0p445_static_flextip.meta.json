@@ -1,0 +1,14 @@
+{
+  "model": "pazy_delft.bdf",
+  "load_node": 13921,
+  "L": 0.5498437,
+  "y_root": 0.00215,
+  "y_end": 0.5519937,
+  "x_axis": 0.043988428,
+  "n_root_nodes": 58,
+  "n_tip_nodes": 58,
+  "rod_center": 1212,
+  "spar_pid": 3,
+  "rod_pid": 13,
+  "sweep": 0.0
+}
