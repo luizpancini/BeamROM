@@ -1,7 +1,7 @@
 using BeamROM, LinearAlgebra, Printf, PrettyTables
 include(joinpath(pkgdir(BeamROM), "nastran", "workflow.jl"))
 
-# Pazy wing without the tip rod (Technion Nastran FEM, see nastran/Pazy_Technion/S0_norod) stiffness matrices by least squares: the compliance matrix of each segment between consecutive beam nodes (or of the whole beam) is fitted to the generalized displacements of all the beam nodes under the six unit loads at the end of the reference axis (the static analysis of PazyS0_norodGlobalStiffnessModel.jl), subject to being positive semidefinite and bounded below (see least_squares_stiffness_matrices). Unlike the exact inversion of PazyS0_norodGlobalStiffnessModel.jl, this gives positive definite stiffness matrices: the transverse shear compliance of the slender wing is a tiny difference of large bending terms, dominated by the deviations from a prismatic beam (clamp, tip), which gives negative shear stiffnesses
+# Pazy wing without the tip rod (Technion Nastran FEM, see nastran/Pazy_Technion/S0_norod) stiffness matrices by least squares: the compliance matrix of each segment between consecutive beam nodes (or of the whole beam) is fitted to the generalized displacements of all the beam nodes under the six unit loads at the end of the reference axis (the static analysis of PazyS0NoRodGlobalStiffnessModel.jl), subject to being positive semidefinite and bounded below (see least_squares_stiffness_matrices). Unlike the exact inversion of PazyS0NoRodGlobalStiffnessModel.jl, this gives positive definite stiffness matrices: the transverse shear compliance of the slender wing is a tiny difference of large bending terms, dominated by the deviations from a prismatic beam (clamp, tip), which gives negative shear stiffnesses
 
 # Sweep angle [deg] of the wing (S0 is the straight wing)
 sweep = 0
@@ -11,13 +11,10 @@ reference_axis = 0.4653
 
 # Beam node distribution: :ribs places the nodes at the root, at the ribs (the first 2 ribs, close to the root, are lumped in the root node, and the last 3 of the 4 close to the tip are lumped in the tip node) and at the tip of the spar. :ribs_halved adds a node at the middle of each segment of :ribs, except the last one (twice as many elements, minus one). An integer gives that number of equally spaced nodes (e.g. 16) and a vector gives fractions of the span
 # Each combination of reference_axis and nodes_distribution is saved in its own file (S0_norod_RA<reference_axis>_ND<nodes_distribution>_least_squares_stiffness_matrices_<segments>.csv)
-nodes_distribution = :ribs
+meshes = [:ribs, :ribs_halved]
 
-# Segments: 
-# :nodes = one stiffness matrix for each segment between consecutive beam nodes; 
-# :global = a single one for the whole beam, fitted to all the nodes; 
-# :ends = one stiffness matrix for each of the two elements of the end segments (root and tip) and a single one for the middle segment, for a total of five segments
-segments = :nodes
+# Segments: :nodes = one stiffness matrix for each segment between consecutive beam nodes; :global = a single one for the whole beam, fitted to all the nodes; :ends = one stiffness matrix for each of the two elements of the end segments (root and tip) and a single one for the middle segment, for a total of five segments
+segments = [:nodes, :global, :ends]
 
 # Spar (60 x 2.25 mm aluminum plate): its shear stiffness G A (without correction factor) bounds the transverse shear stiffnesses, which the data do not determine (without a bound the compliance is singular, i.e. rigid shear)
 b = 60e-3
@@ -31,39 +28,44 @@ Cmin = Diagonal([0, 1/GAmax, 1/GAmax, 0, 0, 0])
 # Weight of the smoothness of the compliances along the beam (0 = none)
 λ = 0
 
-# Beam nodes and their generalized displacements under the six load cases
-bdf = pazy_no_rod_bdf()
-xref = spar_reference_axis(read_gfem(bdf), nodes_distribution; reference_axis, sweep)
-y = [x[2] for x in xref]
-y0 = y .- y[1]
-T, L = nastran_pazy_no_rod_station_response(y; reference_axis, nodes_distribution)
+for mesh in meshes
+    for segment in segments
+        # Beam nodes (y of the Nastran model, from the root) and their generalized displacements under the six load cases
+        bdf = pazy_no_rod_bdf()
+        xref = spar_reference_axis(read_gfem(bdf), mesh; reference_axis, sweep)
+        y = [x[2] for x in xref]
+        y0 = y .- y[1]
+        T, L = nastran_pazy_no_rod_station_response(y; reference_axis, nodes_distribution=mesh)
 
-# Least squares stiffness matrices
-breaks = if segments == :nodes
-    y0
-elseif segments == :ends
-    [y0[1], y0[2], y0[3], y0[end-2], y0[end-1], y0[end]]
-else
-    [y0[1], y0[end]]
+        # Least squares stiffness matrices
+        breaks = if segment == :nodes
+            y0
+        elseif segment == :ends
+            [y0[1], y0[2], y0[3], y0[end-2], y0[end-1], y0[end]]
+        else
+            [y0[1], y0[end]]
+        end
+        fit = least_squares_stiffness_matrices(y=y0, T=T, breaks=breaks, Cmin=Cmin, λ=λ, details=true)
+        S = fit.S
+
+        # Save the stiffness matrices next to the Nastran files, with the coordinates of the ends of the segments relative to the first node (the root of the spar axis)
+        write_discretized_stiffness_csv(pazy_no_rod_least_squares_stiffness_file(; reference_axis, nodes_distribution=mesh, segments=segment), breaks, S)
+
+        # Print summary
+        @printf("S0 least squares stiffness matrices (%s): length of the beam axis L = %.6f m, %d nodes, %d segments, %d iterations\n", segment, L, length(y), length(S), fit.iterations)
+        @printf("RMS of the weighted residuals of the generalized displacements: %.3e\n", fit.residual)
+        @printf("All stiffness matrices positive definite: %s\n", all(isposdef(Symmetric(Sk)) for Sk in S))
+        println("Generalized displacements of the last node: fitted / Nastran")
+        display(round.(fit.T_fit[end] ./ T[end], digits=4))
+
+        # Diagonal of the stiffness matrix of each segment, and the inverse of the diagonal of its compliance (the stiffness without the couplings)
+        table = [1:length(S) breaks[1:end-1] breaks[2:end] reduce(hcat, diag(Sk) for Sk in S)' reduce(hcat, 1 ./ diag(Ck) for Ck in fit.C)']
+        pretty_table(table;
+                    title="Technion Pazy wing S0 least squares stiffness: diagonal of the stiffness matrix of each segment and inverse of the diagonal of its compliance",
+                    fit_table_in_display_horizontally=false,
+                    fit_table_in_display_vertically=false,
+                    column_labels=["Segment", "y1", "y2", "S11", "S22", "S33", "S44", "S55", "S66", "1/C11", "1/C22", "1/C33", "1/C44", "1/C55", "1/C66"],
+                    formatters=[fmt__printf("%d", [1]), fmt__printf("%.5f", [2, 3]), fmt__printf("%.2e", 4:15)])
+    end
 end
-fit = least_squares_stiffness_matrices(y=y0, T=T, breaks=breaks, Cmin=Cmin, λ=λ, details=true)
-S = fit.S
 
-# Save the stiffness matrices next to the Nastran files, with the coordinates of the ends of the segments relative to the first node (the root of the spar axis)
-write_discretized_stiffness_csv(pazy_no_rod_least_squares_stiffness_file(; reference_axis, nodes_distribution, segments), breaks, S)
-
-# Print summary
-@printf("Least squares stiffness matrices (%s): %d nodes, %d segments, %d iterations\n", segments, length(y), length(S), fit.iterations)
-@printf("RMS of the weighted residuals of the generalized displacements: %.3e\n", fit.residual)
-@printf("All stiffness matrices positive definite: %s\n", all(isposdef(Symmetric(Sk)) for Sk in S))
-println("Generalized displacements of the last node: fitted / Nastran")
-display(round.(fit.T_fit[end] ./ T[end], digits=4))
-
-# Diagonal of the stiffness matrix of each segment, and the inverse of the diagonal of its compliance (the stiffness without the couplings)
-table = [1:length(S) breaks[1:end-1] breaks[2:end] reduce(hcat, diag(Sk) for Sk in S)' reduce(hcat, 1 ./ diag(Ck) for Ck in fit.C)']
-pretty_table(table;
-             title="Technion Pazy wing least squares stiffness: diagonal of the stiffness matrix of each segment and inverse of the diagonal of its compliance",
-             fit_table_in_display_horizontally=false,
-             fit_table_in_display_vertically=false,
-             column_labels=["Segment", "y1", "y2", "S11", "S22", "S33", "S44", "S55", "S66", "1/C11", "1/C22", "1/C33", "1/C44", "1/C55", "1/C66"],
-             formatters=[fmt__printf("%d", [1]), fmt__printf("%.5f", [2, 3]), fmt__printf("%.2e", 4:15)])

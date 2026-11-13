@@ -2,7 +2,7 @@
 
 Usage:  python extractModeShapes.py "nastran/Pazy_Technion/S0" --job S0_modal_flextip [--nmodes 15] [--name S0_modal_shapes_flextip]   (swept: "nastran/Pazy_Technion/S10/LE" --job S10_LE_modal_flextip --name S10_LE_modal_shapes_flextip)
 
-Writes <name>_wing.csv and <name>_rod.csv (--name in the case directory; default <job>.shapes), with the translations (basic frame of the model: x = chord, positive aft, y = span, z = vertical) of the first --nmodes modes, each normalized so that its largest translation (of the points of both files) has magnitude 1:
+Writes <name>_wing.csv and, if the model has the tip rod (CBEAM of property --rod-pid), <name>_rod.csv (--name in the case directory; default <job>.shapes), with the translations (basic frame of the model: x = chord, positive aft, y = span, z = vertical) of the first --nmodes modes, each normalized so that its largest translation (of the points of both files) has magnitude 1:
   <name>_wing.csv  columns mode, y [m, from the root section], uLE_x, uLE_y, uLE_z, uTE_x, uTE_y, uTE_z, one row per row of spar grids (those at the same y, within --tol, with at least MIN_SECTION_GRIDS grids) of each mode. The translations are those of the leading edge (LE) and trailing edge (TE) points of the section (at the minimum and maximum x of the shell grids of the model, on the plane z = 0; in a swept wing, shifted along x by y tan(sweep) with the sections, with y the one of the basic frame of the model), from the rigid body motion of the section fitted to the translations of the spar grids (`section_motion` of extractStations.py). The rotation of the section about the chord axis does not move those points
   <name>_rod.csv   columns mode, x [m, from the leading edge], u_x, u_y, u_z, one row per grid of the tip rod (CBEAM of property --rod-pid) of each mode
 """
@@ -73,25 +73,25 @@ def main():
         sections.append(np.hstack([u[:, :3], u_te]))
     sections = np.array(sections).transpose(1, 0, 2)  # (modes, sections, 6)
 
-    # Grids of the rod, along x
+    # Grids of the rod, along x (a model without the tip rod has no rod file)
     rod = sorted({n for e in model.elements.values() if e.type == "CBEAM" and e.pid == args.rod_pid for n in e.node_ids}, key=lambda n: model.nodes[n].xyz[0])
-    if not rod:
-        sys.exit(f"No CBEAM elements with property {args.rod_pid} in the model")
     rod_x = np.array([model.nodes[n].xyz[0] - x_le - tan_sweep * model.nodes[n].xyz[1] for n in rod])
     rod_u = disp[:, [rows[n] for n in rod], :3]  # (modes, grids, 3)
 
     # Normalization of each mode: the largest translation of the points of the files has magnitude 1
-    scale = np.maximum(np.abs(sections).max(axis=(1, 2)), np.abs(rod_u).max(axis=(1, 2)))
+    scale = np.maximum(np.abs(sections).max(axis=(1, 2)), np.abs(rod_u).max(axis=(1, 2), initial=0))
     sections /= scale[:, None, None]
     rod_u /= scale[:, None, None]
 
     wing_rows = [[k + 1, y, *sections[k, i]] for k in range(nmodes) for i, y in enumerate(section_y)]
     rod_rows = [[k + 1, x, *rod_u[k, i]] for k in range(nmodes) for i, x in enumerate(rod_x)]
+    outputs = [("wing", "mode,y,uLE_x,uLE_y,uLE_z,uTE_x,uTE_y,uTE_z", wing_rows, ["%d"] + ["%.10e"] * 7)]
+    if rod:
+        outputs.append(("rod", "mode,x,u_x,u_y,u_z", rod_rows, ["%d"] + ["%.10e"] * 4))
+    else:
+        print(f"No CBEAM elements with property {args.rod_pid} in the model: no rod file")
     stem = args.name or f"{args.job}.shapes"
-    for kind, header, table, fmt in (
-        ("wing", "mode,y,uLE_x,uLE_y,uLE_z,uTE_x,uTE_y,uTE_z", wing_rows, ["%d"] + ["%.10e"] * 7),
-        ("rod", "mode,x,u_x,u_y,u_z", rod_rows, ["%d"] + ["%.10e"] * 4),
-    ):
+    for kind, header, table, fmt in outputs:
         out_file = args.case_dir / f"{stem}_{kind}.csv"
         np.savetxt(out_file, np.array(table), delimiter=",", fmt=fmt, header=header, comments="")
         print("Saved", out_file)

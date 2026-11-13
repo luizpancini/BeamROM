@@ -1,11 +1,12 @@
 using BeamROM, LinearAlgebra, Printf
 include(joinpath(pkgdir(BeamROM), "nastran", "workflow.jl"))
 
-# Technion Pazy wing without the tip rod, modal (SOL 103) analysis with NASTRAN. The eigenvalues of the first modes of the wing clamped at the root are compared with those of a cantilever beam with the properties of the spar and no tip mass (the rod and its concentrated masses are not in the model).
+# Technion Pazy wing without the tip rod, modal (SOL 103) analysis with NASTRAN. The natural frequencies of the first modes of the wing clamped at the root are printed and compared with those of a cantilever beam with the properties of the spar and no tip mass (the rod and its concentrated masses are not in the model). The frequencies of the modes are saved as S0_norod_modal_frequencies.csv (mode number, eigenvalue [(rad/s)²], frequency [Hz]) and the mode shapes as S0_norod_modal_shapes_wing.csv (translations of the sections of the spar, see extractModeShapes.py), in nastran/Pazy_Technion/S0_norod, to be copied to AeroBeams (test/referenceData/Pazy)
 
 # Number of modes requested in the modal analysis (at least the number of modes to compare)
 nd = 10
 nModes = 10
+nd >= nModes || error("nd = $nd must be at least $nModes")
 
 # Eigenvalues [(rad/s)²] of the Nastran modal analysis and beam length
 λ, L = nastran_pazy_no_rod_modal_response(; nd=nd)
@@ -61,10 +62,12 @@ Kt = 6.5e-3
 expectedModes = cantilever_modes(; L, E, G, ρ, A, Iy, Iz, J, Kt, nModes)
 
 # Frequencies [Hz] of the first modes
-nd >= nModes || error("nd = $nd must be at least $nModes")
 f = sqrt.(λ[1:nModes]) / (2π)
-println("Natural frequencies of the Pazy wing without rod (Nastran) and of the equivalent cantilever spar:")
+println("\nNatural frequencies of the Pazy wing S0 without the tip rod (Nastran) and of the equivalent cantilever spar:")
 @printf("%-4s %14s   %-26s %14s %10s\n", "Mode", "Nastran [Hz]", "Spar mode", "Spar [Hz]", "Diff [%]")
 for (i, (name, fExpected)) in enumerate(expectedModes)
     @printf("%-4d %14.4f   %-26s %14.4f %10.2f\n", i, f[i], name, fExpected, 100 * (f[i] - fExpected) / fExpected)
 end
+
+# Frequencies and mode shapes of the first modes, to be copied to AeroBeams (test/referenceData/Pazy)
+foreach(file -> println("Saved ", file), nastran_pazy_no_rod_modal_files(; nmodes=nModes))

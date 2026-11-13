@@ -308,12 +308,27 @@ function pazy_swept_rod_conm2(sweep::Real)
     return PAZY_SWEPT_ROD_CONM2[sweep]
 end
 
+# Folder of the decks and of the Nastran files of a swept wing without the tip rod, nastran/Pazy_Technion/S<sweep>/NoRod (the decks are S<sweep>_<version>_norod.bdf)
+const PAZY_SWEPT_NO_ROD_DIR = "NoRod"
+
+pazy_swept_no_rod_dir(sweep::Real, version::AbstractString) = joinpath(dirname(pazy_swept_dir(sweep, version)), PAZY_SWEPT_NO_ROD_DIR)
+
+# Name of the deck and of the Nastran jobs of a version of a swept wing without the tip rod: S<sweep>_LE_norod, S<sweep>_TE_norod and S<sweep>_baseline_norod
+pazy_swept_no_rod_name(sweep::Real, version::AbstractString) = pazy_swept_name(sweep, version) * "_norod"
+
+pazy_swept_no_rod_bdf(sweep::Real, version::AbstractString) = joinpath(pazy_swept_no_rod_dir(sweep, version), "$(pazy_swept_no_rod_name(sweep, version)).bdf")
+
+function pazy_swept_no_rod_dirs(sweep::Real, version::AbstractString)
+    python, nastranDir, _ = pazy_python_and_dirs()
+    return python, nastranDir, pazy_swept_no_rod_dir(sweep, version), pazy_swept_no_rod_name(sweep, version)
+end
+
 """
     pazy_swept_no_rod_mass_model_file(sweep, version; reference_axis, nodes_distribution) -> String
 
-Path of the CSV file with the equivalent beam mass model of the swept wing with `sweep` degrees of sweep, `version`, without the tip rod (nor the adapter and the FPS weights, see `PAZY_SWEPT_ROD_BEAM_PIDS` and `pazy_swept_rod_conm2`; the calibration mass is part of the wing and stays), for the given reference axis (chord fraction) and nodes distribution, which is nastran/Pazy_Technion/S<sweep>/<version>/S<sweep>_<version>_norod_RA<x>_ND<y>_beam_mass_model.csv.
+Path of the CSV file with the equivalent beam mass model of the swept wing with `sweep` degrees of sweep, `version`, without the tip rod (nor the adapter and the FPS weights, see `PAZY_SWEPT_ROD_BEAM_PIDS` and `pazy_swept_rod_conm2`; the calibration mass is part of the wing and stays), for the given reference axis (chord fraction) and nodes distribution, which is nastran/Pazy_Technion/S<sweep>/NoRod/S<sweep>_<version>_norod_RA<x>_ND<y>_beam_mass_model.csv.
 """
-pazy_swept_no_rod_mass_model_file(sweep::Real, version::AbstractString; reference_axis::Real, nodes_distribution) = joinpath(pazy_swept_dir(sweep, version), "$(pazy_swept_label(sweep))_$(version)_norod_$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))_beam_mass_model.csv")
+pazy_swept_no_rod_mass_model_file(sweep::Real, version::AbstractString; reference_axis::Real, nodes_distribution) = joinpath(pazy_swept_no_rod_dir(sweep, version), "$(pazy_swept_label(sweep))_$(version)_norod_$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))_beam_mass_model.csv")
 
 """
     pazy_swept_stiffness_file(sweep, version; reference_axis, tip=:rigid) -> String
@@ -328,6 +343,20 @@ pazy_swept_stiffness_file(sweep::Real, version::AbstractString; reference_axis::
 Path of the CSV file with the stiffness matrices of the swept wing with `sweep` degrees of sweep, `version`, fitted by `least_squares_stiffness_matrices` (`segments` = `:nodes`, `:global` or `:ends`, see `pazy_least_squares_stiffness_file`) for the given reference axis and nodes distribution, which is nastran/Pazy_Technion/S<sweep>/<version>/S<sweep>_<version>_RA<x>_ND<y>_least_squares_stiffness_matrices_<segments><suffix>.csv, with the suffix of the rigid or flexible tip rod `tip` (see `pazy_tip_suffix`).
 """
 pazy_swept_least_squares_stiffness_file(sweep::Real, version::AbstractString; reference_axis::Real, nodes_distribution, segments::Symbol, tip::Symbol=:rigid) = joinpath(pazy_swept_dir(sweep, version), "$(pazy_swept_label(sweep))_$(version)_$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))_least_squares_stiffness_matrices_$segments$(pazy_tip_suffix(tip)).csv")
+
+"""
+    pazy_swept_no_rod_stiffness_file(sweep, version; reference_axis) -> String
+
+Path of the CSV file with the global stiffness matrix of the swept wing with `sweep` degrees of sweep, `version`, without the tip rod, for the given reference axis (chord fraction), which is nastran/Pazy_Technion/S<sweep>/NoRod/S<sweep>_<version>_norod_RA<x>_stiffness_matrix.csv.
+"""
+pazy_swept_no_rod_stiffness_file(sweep::Real, version::AbstractString; reference_axis::Real) = joinpath(pazy_swept_no_rod_dir(sweep, version), "$(pazy_swept_label(sweep))_$(version)_norod_$(pazy_reference_axis_tag(reference_axis))_stiffness_matrix.csv")
+
+"""
+    pazy_swept_no_rod_least_squares_stiffness_file(sweep, version; reference_axis, nodes_distribution, segments) -> String
+
+Path of the CSV file with the stiffness matrices of the swept wing with `sweep` degrees of sweep, `version`, without the tip rod, fitted by `least_squares_stiffness_matrices` (`segments` = `:nodes`, `:global` or `:ends`) for the given reference axis and nodes distribution, which is nastran/Pazy_Technion/S<sweep>/NoRod/S<sweep>_<version>_norod_RA<x>_ND<y>_least_squares_stiffness_matrices_<segments>.csv.
+"""
+pazy_swept_no_rod_least_squares_stiffness_file(sweep::Real, version::AbstractString; reference_axis::Real, nodes_distribution, segments::Symbol) = joinpath(pazy_swept_no_rod_dir(sweep, version), "$(pazy_swept_label(sweep))_$(version)_norod_$(pazy_reference_axis_tag(reference_axis))_$(pazy_nodes_distribution_tag(nodes_distribution))_least_squares_stiffness_matrices_$segments.csv")
 
 
 function pazy_swept_dirs(sweep::Real, version::AbstractString)
@@ -476,6 +505,94 @@ function nastran_pazy_swept_modal_files(sweep::Real, version::AbstractString; ti
 end
 
 # ------------------------------------------------------------------------------------------------------------
+# Technion Pazy swept wings without the tip rod (S10_norod, S20_norod: the decks of pazy_swept_no_rod_bdf)
+# ------------------------------------------------------------------------------------------------------------
+
+"""
+    nastran_pazy_swept_no_rod_static_response(sweep, version; reference_axis)
+
+Static Nastran workflow for the swept Technion Pazy wing with `sweep` degrees of sweep (S10, S20), `version` = "LE", "TE" or "Baseline", without the tip rod (the deck of `pazy_swept_no_rod_bdf`, which has no property 13, 20, 22 and 24), as `nastran_pazy_swept_static_response` (generatePazy.py --no-rod: the load node is tied to the tip section, with no rod). Files are kept in nastran/Pazy_Technion/S<sweep>/NoRod, named S<sweep>_<version>_norod_RA<x>_static.* (see `pazy_reference_axis_tag`).
+
+Returns `(T, L)`, as in `nastran_pazy_swept_static_response`.
+
+If Nastran is not available on this machine, an error is raised after listing the .bdf to run elsewhere. Copy the .op2 file back to that directory and call this function again. The Python interpreter is the project's `.venv` unless the BEAMROM_PYTHON environment variable is set.
+"""
+function nastran_pazy_swept_no_rod_static_response(sweep::Real, version::AbstractString; reference_axis::Real)
+    python, nastranDir, caseDir, name = pazy_swept_no_rod_dirs(sweep, version)
+    bdf = pazy_swept_no_rod_bdf(sweep, version)
+    tag = pazy_reference_axis_tag(reference_axis)
+    job = "$(name)_$(tag)_static"
+
+    run(`$python $(joinpath(nastranDir, "generatePazy.py")) --bdf $bdf --no-rod --analyses static --sweep $sweep --tag $tag --chord-fraction $reference_axis`)
+    run_pazy_nastran(python, nastranDir, caseDir, job)
+    run(`$python $(joinpath(nastranDir, "extractResponse.py")) $caseDir --job $job`)
+
+    L = parse(Float64, match(r"\"L\":\s*([-+0-9.eE]+)", read(joinpath(caseDir, "$job.meta.json"), String)).captures[1])
+    T = readdlm(joinpath(caseDir, "$job.response.csv"), ',')
+
+    return T, L
+end
+
+"""
+    nastran_pazy_swept_no_rod_station_response(sweep, version, y; reference_axis, nodes_distribution, tol=1e-5, twist_center=:auto)
+
+Generalized displacements of the nodes of a discretized beam of the swept Technion Pazy wing without the tip rod, as `nastran_pazy_swept_station_response` (from the job of `nastran_pazy_swept_no_rod_static_response`, which is generated and run if needed). Its output is S<sweep>_<version>_norod_RA<x>_static.station_response_section_ND<y>.csv.
+
+Returns `(T, L)`, as in `nastran_pazy_swept_station_response`.
+"""
+function nastran_pazy_swept_no_rod_station_response(sweep::Real, version::AbstractString, y::AbstractVector{<:Real}; reference_axis::Real, nodes_distribution, tol::Real=1e-5, twist_center::Union{Symbol,Real}=:auto)
+    twist_center isa Real || twist_center in (:auto, :axis) || throw(ArgumentError("twist_center must be :auto, :axis or a fraction of the chord, got $twist_center"))
+    python, nastranDir, caseDir, name = pazy_swept_no_rod_dirs(sweep, version)
+    _, L = nastran_pazy_swept_no_rod_static_response(sweep, version; reference_axis)
+    job = "$(name)_$(pazy_reference_axis_tag(reference_axis))_static"
+    nodesTag = pazy_nodes_distribution_tag(nodes_distribution)
+
+    run(`$python $(joinpath(nastranDir, "extractStations.py")) $caseDir --job $job --stations $y --tol $tol --tag $nodesTag --twist-center $twist_center`)
+
+    Tall = readdlm(joinpath(caseDir, "$job.station_response_section_$nodesTag.csv"), ',')
+    T = [Tall[6*(k-1)+1:6*k, :] for k in eachindex(y)]
+
+    return T, L
+end
+
+"""
+    nastran_pazy_swept_no_rod_modal_response(sweep, version; nd=10)
+
+Modal Nastran workflow for the swept Technion Pazy wing without the tip rod (generatePazy.py --no-rod), as `nastran_pazy_swept_modal_response`. Files are kept in nastran/Pazy_Technion/S<sweep>/NoRod, named S<sweep>_<version>_norod_modal*.
+
+Returns `(λ, L)`, as in `nastran_pazy_swept_modal_response`.
+"""
+function nastran_pazy_swept_no_rod_modal_response(sweep::Real, version::AbstractString; nd::Integer=10)
+    python, nastranDir, caseDir, name = pazy_swept_no_rod_dirs(sweep, version)
+    bdf = pazy_swept_no_rod_bdf(sweep, version)
+    job = "$(name)_modal"
+    frequencies = "$(name)_modal_frequencies.csv"
+
+    run(`$python $(joinpath(nastranDir, "generatePazy.py")) --bdf $bdf --no-rod --analyses modal --nd $nd --sweep $sweep`)
+    run_pazy_nastran(python, nastranDir, caseDir, job)
+    run(`$python $(joinpath(nastranDir, "extractModes.py")) $caseDir --job $job --out $frequencies`)
+
+    L = parse(Float64, match(r"\"L\":\s*([-+0-9.eE]+)", read(joinpath(caseDir, "$job.json"), String)).captures[1])
+
+    return readdlm(joinpath(caseDir, frequencies), ',')[:, 2], L
+end
+
+"""
+    nastran_pazy_swept_no_rod_modal_files(sweep, version; nmodes=15) -> Vector{String}
+
+Saves the results of the modal analysis of the swept Technion Pazy wing without the tip rod (see `nastran_pazy_swept_no_rod_modal_response`): the frequencies of the modes, S<sweep>_<version>_norod_modal_frequencies.csv, and the mode shapes of the wing of the first `nmodes` modes, S<sweep>_<version>_norod_modal_shapes_wing.csv (extractModeShapes.py writes no rod file, as the model has no rod). Returns their paths.
+"""
+function nastran_pazy_swept_no_rod_modal_files(sweep::Real, version::AbstractString; nmodes::Integer=15)
+    python, nastranDir, caseDir, name = pazy_swept_no_rod_dirs(sweep, version)
+    job = "$(name)_modal"
+    shapes = "$(name)_modal_shapes"
+
+    run(`$python $(joinpath(nastranDir, "extractModeShapes.py")) $caseDir --job $job --nmodes $nmodes --name $shapes`)
+
+    return [joinpath(caseDir, "$(name)_modal_frequencies.csv"), joinpath(caseDir, "$(shapes)_wing.csv")]
+end
+
+# ------------------------------------------------------------------------------------------------------------
 # Technion Pazy wing without the tip rod (S0_norod: the same wing and spar, without the tip rod and its tip masses)
 # ------------------------------------------------------------------------------------------------------------
 
@@ -565,7 +682,7 @@ end
 """
     nastran_pazy_no_rod_modal_response(; nd=10)
 
-Modal Nastran workflow for the Technion Pazy wing without the tip rod (nastran/Pazy_Technion/S0_norod/S0_norod.bdf): generates the modal BDF (generatePazy.py --no-rod, which leaves the tip free, without tie), runs Nastran (runNastran.py) and extracts the eigenvalues (extractModes.py). Files are kept in nastran/Pazy_Technion/S0_norod. `nd` is the number of modes requested.
+Modal Nastran workflow for the Technion Pazy wing without the tip rod (nastran/Pazy_Technion/S0_norod/S0_norod.bdf): generates the modal BDF (generatePazy.py --no-rod, which leaves the tip free, without tie), runs Nastran (runNastran.py) and extracts the eigenvalues (extractModes.py), saved as S0_norod_modal_frequencies.csv. Files are kept in nastran/Pazy_Technion/S0_norod. `nd` is the number of modes requested.
 
 Returns `(λ, L)`, as in `nastran_pazy_modal_response`.
 
@@ -575,12 +692,28 @@ function nastran_pazy_no_rod_modal_response(; nd::Integer=10)
     python, nastranDir, caseDir = pazy_no_rod_dirs()
     bdf = pazy_no_rod_bdf()
     job = "$(PAZY_NO_ROD_NAME)_modal"
+    frequencies = "$(PAZY_NO_ROD_NAME)_modal_frequencies.csv"
 
     run(`$python $(joinpath(nastranDir, "generatePazy.py")) --bdf $bdf --no-rod --sweep $PAZY_STRAIGHT_SWEEP --analyses modal --nd $nd`)
     run_pazy_nastran(python, nastranDir, caseDir, job)
-    run(`$python $(joinpath(nastranDir, "extractModes.py")) $caseDir --job $job`)
+    run(`$python $(joinpath(nastranDir, "extractModes.py")) $caseDir --job $job --out $frequencies`)
 
     L = parse(Float64, match(r"\"L\":\s*([-+0-9.eE]+)", read(joinpath(caseDir, "$job.json"), String)).captures[1])
 
-    return readdlm(joinpath(caseDir, "$job.eigenvalues.csv"), ',')[:, 2], L
+    return readdlm(joinpath(caseDir, frequencies), ',')[:, 2], L
+end
+
+"""
+    nastran_pazy_no_rod_modal_files(; nmodes=15) -> Vector{String}
+
+Saves the results of the modal analysis of the Technion Pazy wing without the tip rod (see `nastran_pazy_no_rod_modal_response`): the frequencies of the modes, S0_norod_modal_frequencies.csv, and the mode shapes of the wing of the first `nmodes` modes, S0_norod_modal_shapes_wing.csv (extractModeShapes.py writes no rod file, as the model has no rod). Returns their paths.
+"""
+function nastran_pazy_no_rod_modal_files(; nmodes::Integer=15)
+    python, nastranDir, caseDir = pazy_no_rod_dirs()
+    job = "$(PAZY_NO_ROD_NAME)_modal"
+    shapes = "$(PAZY_NO_ROD_NAME)_modal_shapes"
+
+    run(`$python $(joinpath(nastranDir, "extractModeShapes.py")) $caseDir --job $job --nmodes $nmodes --name $shapes`)
+
+    return [joinpath(caseDir, "$(PAZY_NO_ROD_NAME)_modal_frequencies.csv"), joinpath(caseDir, "$(shapes)_wing.csv")]
 end
