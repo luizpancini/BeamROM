@@ -1,7 +1,6 @@
 .venv/
 __pycache__/
 *.op2
-*.bdf
 *.f06
 *.pch
 *.f04
