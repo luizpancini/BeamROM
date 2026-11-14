@@ -566,12 +566,12 @@ end
 """
     write_beam_mass_csv(path, xref, m, offsets, tensors)
 
-Writes the beam mass model to a CSV file with one row per beam node: node number, reference axis coordinates (x, y, z), mass, center of mass offsets (dx, dy, dz) relative to the node, and the inertia tensor components about the center of mass (Jxx, Jyy, Jzz, Jxy, Jxz, Jyz).
+Writes the beam mass model to a CSV file with one row per beam node: node number, reference axis coordinates (x, y, z), mass, center of mass offsets (dx, dy, dz) relative to the node, and the inertia tensor components about the center of mass (Ixx, Iyy, Izz, Ixy, Ixz, Iyz).
 """
 function write_beam_mass_csv(path::AbstractString, xref, m, offsets, tensors)
     mkpath(dirname(abspath(path)))
     open(path, "w") do io
-        println(io, "node,x,y,z,m,dx,dy,dz,Jxx,Jyy,Jzz,Jxy,Jxz,Jyz")
+        println(io, "node,x,y,z,m,dx,dy,dz,Ixx,Iyy,Izz,Ixy,Ixz,Iyz")
         for k in eachindex(m)
             J = tensors[k]
             @printf(io, "%d,%.14e,%.14e,%.14e,%.14e,%.14e,%.14e,%.14e,%.14e,%.14e,%.14e,%.14e,%.14e,%.14e\n", k, xref[k]..., m[k], offsets[k]..., J[1, 1], J[2, 2], J[3, 3], J[1, 2], J[1, 3], J[2, 3])

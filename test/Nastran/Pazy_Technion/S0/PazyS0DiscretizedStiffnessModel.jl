@@ -26,9 +26,9 @@ T, L = nastran_pazy_station_response(y; reference_axis, tip)
 # Compute the stiffness matrix of each segment
 S = discretized_stiffness_matrices(y=y, T=T)
 
-# Save the stiffness matrices next to the Nastran files, with the beam node coordinates relative to the first node (the root of the spar axis)
+# Save the stiffness matrices next to the Nastran files, with the beam node coordinates relative to the first node (the root of the spar axis). They are not symmetric, so all their entries are saved
 y0 = y .- y[1]
-write_discretized_stiffness_csv(pazy_discretized_stiffness_file(; reference_axis, mesh, tip), y0, S)
+write_discretized_stiffness_csv(pazy_discretized_stiffness_file(; reference_axis, mesh, tip), y0, S; symmetric=false)
 
 # Stiffness matrix of the whole beam, from the generalized displacements of the last node, and of the spar alone (60 x 2.25 mm aluminum plate, see OneDBeamNastran.jl for the correction factors), as references
 Tend = T[end]

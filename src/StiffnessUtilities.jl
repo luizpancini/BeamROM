@@ -84,16 +84,23 @@ function anisotropic_stiffness_matrix(; ∞=1e16,EA=∞,GA2=∞,GA3=∞,GJ=∞,E
 end
 export anisotropic_stiffness_matrix
 
+# Throws if the stiffness matrix is not symmetric, since only its upper triangle is written
+function check_symmetric(S::AbstractMatrix)
+    norm(S - S') <= 1e-9 * norm(S) || throw(ArgumentError("the stiffness matrix is not symmetric, so only its upper triangle can be written"))
+    return nothing
+end
+
 """
     write_stiffness_csv(path, S)
 
-Writes a 6x6 sectional stiffness matrix to a CSV file, without header: row i holds the i-th generalized force component (F1, F2, F3, M1, M2, M3) for the six generalized strains (columns), at full precision.
+Writes a symmetric 6x6 sectional stiffness matrix to a CSV file, without header: row i holds the i-th generalized force component (F1, F2, F3, M1, M2, M3) for the six generalized strains from the i-th one on (columns i to 6, the upper triangle, as the lower terms are equal to them), at full precision. The rows have 6, 5, ..., 1 entries.
 """
 function write_stiffness_csv(path::AbstractString, S::AbstractMatrix)
+    check_symmetric(S)
     mkpath(dirname(abspath(path)))
     open(path, "w") do io
         for i in axes(S, 1)
-            println(io, join((@sprintf("%.14e", S[i, j]) for j in axes(S, 2)), ","))
+            println(io, join((@sprintf("%.14e", S[i, j]) for j in i:size(S, 2)), ","))
         end
     end
     return path
@@ -101,17 +108,19 @@ end
 export write_stiffness_csv
 
 """
-    write_discretized_stiffness_csv(path, y, S)
+    write_discretized_stiffness_csv(path, y, S; symmetric=true)
 
-Writes the sectional stiffness matrices `S` of the segments of a discretized beam, with the nodes at the coordinates `y` (`length(S) == length(y) - 1`), to a CSV file with a header: one row per segment with its index, the coordinates of its nodes (`y1`, `y2`) and the entries of its stiffness matrix by row (`S11, S12, ..., S66`, generalized forces F1, F2, F3, M1, M2, M3 by generalized strains), at full precision.
+Writes the sectional stiffness matrices `S` of the segments of a discretized beam, with the nodes at the coordinates `y` (`length(S) == length(y) - 1`), to a CSV file with a header: one row per segment with its index, the coordinates of its nodes (`y1`, `y2`) and the entries of its stiffness matrix by row (`S11, S12, ..., S66`, generalized forces F1, F2, F3, M1, M2, M3 by generalized strains), at full precision. With `symmetric=true` (the default) only the upper triangle is written (`S11, S12, ..., S16, S22, ..., S66`), as the matrices must be symmetric; with `symmetric=false` all 36 entries are written, for non-symmetric matrices.
 """
-function write_discretized_stiffness_csv(path::AbstractString, y::AbstractVector, S::AbstractVector{<:AbstractMatrix})
+function write_discretized_stiffness_csv(path::AbstractString, y::AbstractVector, S::AbstractVector{<:AbstractMatrix}; symmetric::Bool=true)
     length(S) == length(y) - 1 || throw(ArgumentError("expected $(length(y) - 1) stiffness matrices for $(length(y)) nodes, got $(length(S))"))
+    symmetric && foreach(check_symmetric, S)
+    entries = [(i, j) for i in 1:6 for j in 1:6 if !symmetric || i <= j]
     mkpath(dirname(abspath(path)))
     open(path, "w") do io
-        println(io, "segment,y1,y2,", join(("S$i$j" for i in 1:6 for j in 1:6), ","))
+        println(io, "segment,y1,y2,", join(("S$i$j" for (i, j) in entries), ","))
         for k in eachindex(S)
-            println(io, k, ",", @sprintf("%.14e", y[k]), ",", @sprintf("%.14e", y[k+1]), ",", join((@sprintf("%.14e", S[k][i, j]) for i in 1:6 for j in 1:6), ","))
+            println(io, k, ",", @sprintf("%.14e", y[k]), ",", @sprintf("%.14e", y[k+1]), ",", join((@sprintf("%.14e", S[k][i, j]) for (i, j) in entries), ","))
         end
     end
     return path

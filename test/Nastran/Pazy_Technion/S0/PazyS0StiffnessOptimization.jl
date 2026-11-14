@@ -153,11 +153,22 @@ nSeg = maximum(elementSegment)
 breakNodes = [findfirst(==(g), elementSegment) for g in 1:nSeg]
 breaks = [y[breakNodes] .- y[1]; y[end] - y[1]]
 
+# Symmetric 6x6 matrix from its upper triangle by rows (S11, S12, ..., S16, S22, ..., S66), as saved by write_discretized_stiffness_csv
+function symmetric_from_upper(v)
+    S = zeros(6, 6)
+    k = 0
+    for i in 1:6, j in i:6
+        k += 1
+        S[i, j] = S[j, i] = v[k]
+    end
+    return S
+end
+
 # Nominal stiffness matrices of the segments (least squares), symmetrized, with modified shear stiffnesses
 lsData = readdlm(stiffnessFile, ',', Float64; skipstart=1)
 size(lsData, 1) == nSeg || error("$stiffnessFile has $(size(lsData, 1)) segments, but the mass model has $nSeg: run PazyS0LeastSquaresStiffnessModel.jl with the same reference_axis, mesh and segments")
 isapprox(lsData[:, 2:3], [breaks[1:end-1] breaks[2:end]]; atol=1e-6 * L) || error("the segments of $stiffnessFile do not match those of the mass model: run PazyS0LeastSquaresStiffnessModel.jl with the same reference_axis, mesh and segments")
-S0s = [Matrix(transpose(reshape(lsData[g, 4:end], 6, 6))) for g in 1:nSeg]
+S0s = [symmetric_from_upper(lsData[g, 4:end]) for g in 1:nSeg]
 for S0 in S0s
     S0 .= (S0 + S0') / 2
     for (i, GA) in ((2, GAy), (3, GAz))
