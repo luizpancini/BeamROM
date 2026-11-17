@@ -834,3 +834,19 @@ function nastran_pazy_delft_modal_response(; nd::Integer=10, tip::Symbol=:flexib
 
     return readdlm(joinpath(caseDir, frequencies), ',')[:, 2], L
 end
+
+"""
+    nastran_pazy_delft_modal_shapes(; tip=:flexible, nmodes=15) -> Vector{String}
+
+Extracts the mode shapes of the first `nmodes` modes of the modal analysis of the Delft Pazy wing with the tip rod `tip` (the .op2 of `nastran_pazy_delft_modal_response`, pazy_delft_modal<suffix>.op2) with extractModeShapes.py, as `nastran_pazy_modal_shapes` does for the Technion wing, with the spar PSHELL 3 and the tip rod PBEAM 13. Saves them as pazy_delft_modal_shapes<suffix>_wing.csv and pazy_delft_modal_shapes<suffix>_rod.csv in nastran/Pazy_Delft (to be copied to AeroBeams, test/referenceData/Pazy) and returns their paths.
+"""
+function nastran_pazy_delft_modal_shapes(; tip::Symbol=:flexible, nmodes::Integer=15)
+    python, nastranDir, caseDir = pazy_delft_dirs()
+    suffix = pazy_tip_suffix(tip)
+    job = "$(PAZY_DELFT_NAME)_modal" * suffix
+    name = "$(PAZY_DELFT_NAME)_modal_shapes" * suffix
+
+    run(`$python $(joinpath(nastranDir, "extractModeShapes.py")) $caseDir --job $job --nmodes $nmodes --name $name --spar-pid $PAZY_DELFT_SPAR_PID --rod-pid $PAZY_DELFT_ROD_PID`)
+
+    return [joinpath(caseDir, "$(name)_$kind.csv") for kind in ("wing", "rod")]
+end

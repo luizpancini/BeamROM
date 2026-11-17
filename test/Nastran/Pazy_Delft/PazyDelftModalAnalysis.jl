@@ -11,6 +11,10 @@ responses = pazy_tip_responses(tip -> nastran_pazy_delft_modal_response(; nd=nd,
 λ, _ = responses[:rigid]
 λFlex, _ = responses[:flexible]
 
+for tip in tips
+    foreach(file -> println("Saved ", file), nastran_pazy_delft_modal_shapes(; tip=tip, nmodes=nModes))
+end
+
 nd >= nModes || error("nd = $nd must be at least $nModes")
 f = sqrt.(λ[1:nModes]) / (2π)
 fFlex = sqrt.(λFlex[1:nModes]) / (2π)
