@@ -13,11 +13,12 @@ reference_axis = 0.4653
 # Each combination of reference axis and mesh is saved in its own file (S0_RA<reference_axis>_inertia_matrices_<nominal|refined>mesh.csv)
 meshes = [:nominal, :refined]
 
+global model 
 for mesh in meshes
 
     # Get GFEM model and compute the equivalent beam mass model
     bdf = joinpath(pkgdir(BeamROM), "nastran", "Pazy_Technion", "S0", "S0.bdf")
-    model = pazy_beam_mass_model(bdf; nodes=mesh, reference_axis, sweep, verbose=false)
+    global model = pazy_beam_mass_model(bdf; nodes=mesh, reference_axis, sweep, verbose=false)
 
     # Beam node coordinates in the output: x and z are in the Nastran basic frame (x = chordwise position from the origin of the reference system, i.e. the leading edge at x = 0 plus reference_axis of the chord), and only y starts at zero at the first node (the root of the spar axis). The offsets and tensors are relative to the nodes and to the centers of mass
     xref0 = [[x[1], x[2] - model.xref[1][2], x[3]] for x in model.xref]
