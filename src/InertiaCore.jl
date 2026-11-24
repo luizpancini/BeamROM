@@ -1,6 +1,6 @@
-# Generation of the equivalent beam mass model following the methodology of the "Equivalent Beam Mass Model":
+# Generation of the equivalent beam mass model
 #
-#   The GFEM is represented as a collection of lumped masses m_i located at x_i + δ_i (x_i = GFEM grid position, δ_i = mass offset) with lumped inertia tensors J_i about x_i + δ_i, all in the Nastran frame. The equivalent mass, offset and inertia tensor at each beam reference-axis node are obtained by  summing the contributions of the GFEM grids in its nearest neighborhood:
+#   The GFEM is represented as a collection of lumped masses m_i located at x_i + δ_i (x_i = GFEM grid position, δ_i = mass offset) with lumped inertia tensors J_i about x_i + δ_i, all in the Nastran frame. The equivalent mass, offset and inertia tensor at each node of the beam's reference axis are obtained by  summing the contributions of the GFEM grids in its nearest spanwise neighborhood:
 #
 #   m_ref = Σ m_i,   
 #   δ_ref = (1/m_ref) Σ m_i (x_i + δ_i − x_ref),   
@@ -9,7 +9,7 @@
 # 1. Lumped GFEM (equivalent to the diagonal blocks of Nastran's lumped mass matrix, PARAM,COUPMASS,-1):
 #    - CHEXA (8 nodes, PSOLID/MAT1): mass ρ V distributed to the grids by the row sum of the consistent mass matrix, ρ ∫ Nᵢ dV (2×2×2 Gauss quadrature of the trilinear isoparametric map; V/8 per grid for parallelepipeds), no rotational inertia;
 #    - CQUAD4/CTRIA3: mass (ρ t + NSM) A distributed to the grids by the row sum of the consistent mass matrix, ∫ Nᵢ dA (equal split for parallelograms/triangles), no rotational inertia;
-#    - CBEAM/CBAR: half of ∫(ρ A + NSM) dx at each end grid, placed at the PBEAM neutral axis offset (N1, N2) (PBAR: on the element axis); the torsional rotary inertia ρ (I1 + I2) L / 2 about the element axis is also lumped at each end;
+#    - CBEAM/CBAR: 1/2 ∫(ρ A + NSM) dx at each end grid, placed at the PBEAM neutral axis offset (N1, N2) (PBAR: on the element axis); the torsional rotary inertia ρ (I1 + I2) L / 2 about the element axis is also lumped at each end;
 #    - CONM2: mass, offset and inertia tensor about the center of mass taken directly from the card (Nastran's I21, I31, I32 are products of inertia, so the tensor off-diagonals are their negatives).
 # 2. Reference axis: specified by the user as the list of beam node coordinates (e.g. `straight_axis`). For simple prismatic models it is the elastic axis, which coincides with the shear center.
 # 3. Nearest neighborhood: each GFEM grid is assigned to the beam node with the closest coordinate along the span direction (by default the direction of the reference axis, but it can be set, e.g. to the unswept span of a swept wing), i.e. the structure is sliced into bins centered at the beam nodes (the Euclidean distance to a swept axis gives a different and wrong split between the last nodes). The mass of the grids that lie exactly midway between beam nodes (up to round-off) is split equally between them.
@@ -72,8 +72,7 @@ end
 """
     read_bulk_lines(path) -> Vector{String}
 
-Reads the bulk data lines of a Nastran input file, resolving `INCLUDE` statements (relative to the file folder),
-skipping comments and, if present, everything outside the `BEGIN BULK`/`ENDDATA` section.
+Reads the bulk data lines of a Nastran input file, resolving `INCLUDE` statements (relative to the file folder), skipping comments and, if present, everything outside the `BEGIN BULK`/`ENDDATA` section.
 """
 function read_bulk_lines(path::AbstractString)
     raw = readlines(path)
@@ -132,11 +131,11 @@ end
 
 struct GFEM
     grids::Dict{Int,Vector{Float64}}
-    shells::Vector{Tuple{Int,Int,Vector{Int}}} # (eid, pid, grids)
+    shells::Vector{Tuple{Int,Int,Vector{Int}}} # (eid, pid, grids) of the CTRIA3 and CQUAD4 elements
     solids::Vector{Tuple{Int,Int,Vector{Int}}} # (eid, pid, grids) of the CHEXA elements
     beams::Vector{Tuple{Int,Int,Int,Int,Union{Int,Vector{Float64}}}} # (eid, pid, ga, gb, orientation) of the CBEAM elements
-    bars::Vector{Tuple{Int,Int,Int,Int,Union{Int,Vector{Float64}}}} # same as beams, for the CBAR elements
-    conm2::Vector{Tuple{Int,Int,Int,Float64,Vector{Float64},Matrix{Float64}}}  # (eid, grid, cid, m, offset, J)
+    bars::Vector{Tuple{Int,Int,Int,Int,Union{Int,Vector{Float64}}}} # (eid, pid, ga, gb, orientation) of the CBAR elements
+    conm2::Vector{Tuple{Int,Int,Int,Float64,Vector{Float64},Matrix{Float64}}}  # (eid, grid, cid, m, offset, J) of the CONM2 elements
     pshell::Dict{Int,NamedTuple{(:mid1, :mid2, :t, :nsm),Tuple{Int,Int,Float64,Float64}}}
     psolid::Dict{Int,Int}        # pid => mid
     pbeam::Dict{Int,PBeam}
@@ -369,9 +368,9 @@ end
     lump_gfem(gfem; shell_lumping=:rowsum, solid_lumping=:rowsum, beam_axis_offsets=true, beam_torsional_inertia=true) -> Vector{LumpedMass}
 
 Builds the lumped mass representation of the GFEM, equivalent to Nastran's lumped (PARAM,COUPMASS,-1) mass matrix:
-- CHEXA elements: mass ρ V distributed to the element grids according to `solid_lumping` (see `solid_nodal_volumes`), no rotational inertia;
-- shell elements: mass (ρ t + NSM) A distributed to the element grids according to `shell_lumping` (see `shell_nodal_areas`), no rotational inertia;
-- beam elements (CBEAM and CBAR): mass ∫(ρ A + NSM) dx lumped at the end grids (consistent with linear interpolation along the element). If `beam_axis_offsets` is true the structural and nonstructural masses are placed at the neutral axis (N1, N2) and NSM center of gravity (M1, M2) offsets of the PBEAM (a PBAR has none). If `beam_torsional_inertia` is true, the rotary inertia about the element axis ∫ρ(I1 + I2)dx is also lumped at the end grids (no bending rotary inertia), as MSC Nastran does for the CBEAM;
+- solid (CHEXA) elements: mass ρ V distributed to the element grids according to `solid_lumping` (see `solid_nodal_volumes`), no rotational inertia;
+- shell (CTRIA3 and CQUAD4) elements: mass (ρ t + NSM) A distributed to the element grids according to `shell_lumping` (see `shell_nodal_areas`), no rotational inertia;
+- beam (CBEAM and CBAR) elements: mass ∫(ρ A + NSM) dx lumped at the end grids (consistent with linear interpolation along the element). If `beam_axis_offsets` is true the structural and nonstructural masses are placed at the neutral axis (N1, N2) and NSM center of gravity (M1, M2) offsets of the PBEAM (a PBAR has none). If `beam_torsional_inertia` is true, the rotary inertia about the element axis ∫ρ(I1 + I2)dx is also lumped at the end grids (no bending rotary inertia), as MSC Nastran does for the CBEAM;
 - CONM2: mass, offset and inertia tensor taken directly from the card.
 """
 function lump_gfem(gfem::GFEM; shell_lumping::Symbol=:rowsum, solid_lumping::Symbol=:rowsum, beam_axis_offsets::Bool=true, beam_torsional_inertia::Bool=true)
@@ -448,7 +447,7 @@ end
 """
     lump_by_grid(lumped) -> Vector{LumpedMass}
 
-Combines all lumped masses attached to the same GFEM grid into a single mass m_i at x_i + δ_i with inertia J_i about x_i + δ_i, as in the methodology description.
+Combines all lumped masses attached to the same GFEM grid into a single mass m_i at x_i + δ_i with inertia J_i about x_i + δ_i.
 """
 function lump_by_grid(lumped::Vector{LumpedMass})
     acc = Dict{Int,Tuple{Float64,Vector{Float64},Matrix{Float64}}}()  # m, m*p, J about origin
