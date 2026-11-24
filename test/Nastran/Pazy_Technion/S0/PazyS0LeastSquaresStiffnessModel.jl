@@ -10,14 +10,14 @@ sweep = 0
 reference_axis = 0.4653
 
 # Beam mesh: :nominal places the nodes at the root, at the ribs (the first 2 ribs, close to the root, are lumped in the root node, and the last 3 of the 4 close to the tip are lumped in the tip node) and at the tip of the spar. :refined adds a node at the middle of each segment of :nominal, except the last one (twice as many elements, minus one). An integer gives that number of equally spaced nodes (e.g. 16) and a vector gives fractions of the span
-# Each combination of reference axis, mesh, tip and segments is saved in its own file (S0_RA<reference_axis>_stiffness_matrices_<nominal|refined>mesh_<flex|rigid>tip.csv, with _global or _ends at the end for those segments)
+# Each combination of reference axis, mesh, tip and segments is saved in its own file (S0_RA<reference_axis>_stiffness_matrices_<nominal|refined>mesh_<flex|rigid>tip.csv, with _global at the end for :global segments)
 meshes = [:nominal, :refined]
 
 # Tip rod of the Nastran model: :rigid (the rod, property 13, is made of a rigid nylon, so the tip section of the wing is, as the stiffness matrices require) or :flexible (the rod of the model, which bends). The results of each have the suffix _rigidtip or _flextip in their file names (see pazy_tip_suffix)
 tips = [:flexible, :rigid]
 
-# Segments: :nodes = one stiffness matrix for each segment between consecutive beam nodes; :global = a single one for the whole beam, fitted to all the nodes; :ends = one stiffness matrix for each of the two elements of the end segments (root and tip) and a single one for the middle segment, for a total of five segments
-segments = [:nodes, :global, :ends]
+# Segments: :nodes = one stiffness matrix for each segment between consecutive beam nodes; :global = a single one for the whole beam, fitted to all the nodes
+segments = [:nodes, :global]
 
 # Spar (60 x 2.25 mm aluminum plate): its shear stiffness G A (without correction factor) bounds the transverse shear stiffnesses, which the data do not determine (without a bound the compliance is singular, i.e. rigid shear)
 b = 60e-3
@@ -42,13 +42,7 @@ for mesh in meshes
             T, L = nastran_pazy_station_response(y; reference_axis, tip)
 
             # Least squares stiffness matrices
-            breaks = if segments == :nodes
-                y0
-            elseif segments == :ends
-                [y0[1], y0[2], y0[3], y0[end-2], y0[end-1], y0[end]]
-            else
-                [y0[1], y0[end]]
-            end
+            breaks = segments == :nodes ? y0 : [y0[1], y0[end]]
             fit = least_squares_stiffness_matrices(y=y0, T=T, breaks=breaks, Cmin=Cmin, λ=λ, details=true)
             S = fit.S
 

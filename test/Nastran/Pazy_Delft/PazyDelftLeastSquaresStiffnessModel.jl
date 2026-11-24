@@ -10,7 +10,7 @@ meshes = [:nominal, :refined]
 
 tips = [:flexible, :rigid]
 
-segments = [:nodes, :global, :ends]
+segments = [:nodes, :global]
 
 # Spar (60 x 1.8 mm aluminum plate): its shear stiffness G A (without correction factor) bounds the transverse shear stiffnesses, which the data do not determine (without a bound the compliance is singular, i.e. rigid shear)
 b = 60e-3
@@ -31,13 +31,7 @@ for mesh in meshes
             y0 = y .- y[1]
             T, L = nastran_pazy_delft_station_response(y; reference_axis, tip)
 
-            breaks = if segments == :nodes
-                y0
-            elseif segments == :ends
-                [y0[1], y0[2], y0[3], y0[end-2], y0[end-1], y0[end]]
-            else
-                [y0[1], y0[end]]
-            end
+            breaks = segments == :nodes ? y0 : [y0[1], y0[end]]
             fit = least_squares_stiffness_matrices(y=y0, T=T, breaks=breaks, Cmin=Cmin, λ=λ, details=true)
             S = fit.S
 

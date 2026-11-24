@@ -13,11 +13,11 @@ version = "Baseline"
 reference_axis = 0.447
 
 # Beam mesh: :nominal places the nodes at the root, at the ribs (the first 2 ribs, close to the root, are lumped in the root node, and the last 3 of the 4 close to the tip are lumped in the tip node) and at the tip of the spar. :refined adds a node at the middle of each segment of :nominal, except the last one (twice as many elements, minus one). An integer gives that number of equally spaced nodes (e.g. 16) and a vector gives fractions of the span
-# Each combination of reference axis, mesh and segments is saved in its own file (S10_<version>_norod_RA<reference_axis>_stiffness_matrices_<nominal|refined>mesh.csv, with the version in lower case and _global or _ends at the end for those segments)
+# Each combination of reference axis, mesh and segments is saved in its own file (S10_<version>_norod_RA<reference_axis>_stiffness_matrices_<nominal|refined>mesh.csv, with the version in lower case and _global at the end for :global segments)
 meshes = [:nominal, :refined]
 
-# Segments: :nodes = one stiffness matrix for each segment between consecutive beam nodes; :global = a single one for the whole beam, fitted to all the nodes; :ends = one stiffness matrix for each of the two elements of the end segments (root and tip) and a single one for the middle segment, for a total of five segments
-segments = [:nodes, :global, :ends]
+# Segments: :nodes = one stiffness matrix for each segment between consecutive beam nodes; :global = a single one for the whole beam, fitted to all the nodes
+segments = [:nodes, :global]
 
 # Spar (60 x 2.25 mm aluminum plate): its shear stiffness G A (without correction factor) bounds the transverse shear stiffnesses, which the data do not determine (without a bound the compliance is singular, i.e. rigid shear)
 b = 60e-3
@@ -41,13 +41,7 @@ for mesh in meshes
         T, L = nastran_pazy_swept_no_rod_station_response(sweep, version, y; reference_axis)
 
         # Least squares stiffness matrices
-        breaks = if segments == :nodes
-            x1
-        elseif segments == :ends
-            [x1[1], x1[2], x1[3], x1[end-2], x1[end-1], x1[end]]
-        else
-            [x1[1], x1[end]]
-        end
+        breaks = segments == :nodes ? x1 : [x1[1], x1[end]]
         fit = least_squares_stiffness_matrices(y=x1, T=T, breaks=breaks, Cmin=Cmin, λ=λ, details=true)
         S = fit.S
 

@@ -66,9 +66,9 @@ function pazy_mesh_tag(mesh::AbstractVector{<:Real})
     return "v$(length(mesh))_" * string(checksum, base=16, pad=8) * "mesh"
 end
 
-# Suffix of the names of the least squares stiffness files for the `segments` of the fit: none for :nodes (one matrix for each segment between the beam nodes, as in AeroBeams), "_global" or "_ends" otherwise
+# Suffix of the names of the least squares stiffness files for the `segments` of the fit: none for :nodes (one matrix for each segment between the beam nodes, as in AeroBeams), "_global" for :global
 function pazy_segments_suffix(segments::Symbol)
-    segments in (:nodes, :global, :ends) || throw(ArgumentError("segments must be :nodes, :global or :ends, got $segments"))
+    segments in (:nodes, :global) || throw(ArgumentError("segments must be :nodes or :global, got $segments"))
     return segments == :nodes ? "" : "_$segments"
 end
 
@@ -137,7 +137,7 @@ pazy_clamped_segment_stiffness_file(; reference_axis::Real, mesh, intervals::Int
 """
     pazy_least_squares_stiffness_file(; reference_axis, mesh, segments, tip=:rigid) -> String
 
-Path of the CSV file with the stiffness matrices of the Technion Pazy wing fitted by `least_squares_stiffness_matrices` (`segments` = `:nodes` for one for each segment between the beam nodes, `:global` for a single one, `:ends` for five: one for each of the two elements of the end segments and one for the middle segment) for the given reference axis and mesh, which is nastran/Pazy_Technion/S0/S0_RA<x>_stiffness_matrices_<mesh><suffix>.csv (see `pazy_mesh_tag` and `pazy_tip_suffix`), as in AeroBeams (test/referenceData/Pazy) but with the reference axis. The files of `:global` and `:ends` have the suffix `_global` and `_ends` (see `pazy_segments_suffix`).
+Path of the CSV file with the stiffness matrices of the Technion Pazy wing fitted by `least_squares_stiffness_matrices` (`segments` = `:nodes` for one for each segment between the beam nodes, `:global` for a single one) for the given reference axis and mesh, which is nastran/Pazy_Technion/S0/S0_RA<x>_stiffness_matrices_<mesh><suffix>.csv (see `pazy_mesh_tag` and `pazy_tip_suffix`), as in AeroBeams (test/referenceData/Pazy) but with the reference axis. The file of `:global` has the suffix `_global` (see `pazy_segments_suffix`).
 """
 pazy_least_squares_stiffness_file(; reference_axis::Real, mesh, segments::Symbol, tip::Symbol=:rigid) = joinpath(@__DIR__, "Pazy_Technion", "S0", "S0_$(pazy_reference_axis_tag(reference_axis))_stiffness_matrices_$(pazy_mesh_tag(mesh))$(pazy_tip_suffix(tip))$(pazy_segments_suffix(segments)).csv")
 
@@ -343,7 +343,7 @@ pazy_swept_stiffness_file(sweep::Real, version::AbstractString; reference_axis::
 """
     pazy_swept_least_squares_stiffness_file(sweep, version; reference_axis, mesh, segments, tip=:rigid) -> String
 
-Path of the CSV file with the stiffness matrices of the swept wing with `sweep` degrees of sweep, `version`, fitted by `least_squares_stiffness_matrices` (`segments` = `:nodes`, `:global` or `:ends`, see `pazy_least_squares_stiffness_file`) for the given reference axis and mesh, which is nastran/Pazy_Technion/S<sweep>/<version>/S<sweep>_<version>_RA<x>_stiffness_matrices_<mesh><suffix>.csv (see `pazy_mesh_tag`; the version is as in `pazy_swept_name`, e.g. S10_baseline), with the suffix of the rigid or flexible tip rod `tip` (see `pazy_tip_suffix`), and `_global` or `_ends` after it for those `segments` (see `pazy_segments_suffix`).
+Path of the CSV file with the stiffness matrices of the swept wing with `sweep` degrees of sweep, `version`, fitted by `least_squares_stiffness_matrices` (`segments` = `:nodes` or `:global`, see `pazy_least_squares_stiffness_file`) for the given reference axis and mesh, which is nastran/Pazy_Technion/S<sweep>/<version>/S<sweep>_<version>_RA<x>_stiffness_matrices_<mesh><suffix>.csv (see `pazy_mesh_tag`; the version is as in `pazy_swept_name`, e.g. S10_baseline), with the suffix of the rigid or flexible tip rod `tip` (see `pazy_tip_suffix`), and `_global` after it for `segments = :global` (see `pazy_segments_suffix`).
 """
 pazy_swept_least_squares_stiffness_file(sweep::Real, version::AbstractString; reference_axis::Real, mesh, segments::Symbol, tip::Symbol=:rigid) = joinpath(pazy_swept_dir(sweep, version), "$(pazy_swept_name(sweep, version))_$(pazy_reference_axis_tag(reference_axis))_stiffness_matrices_$(pazy_mesh_tag(mesh))$(pazy_tip_suffix(tip))$(pazy_segments_suffix(segments)).csv")
 
@@ -357,7 +357,7 @@ pazy_swept_no_rod_stiffness_file(sweep::Real, version::AbstractString; reference
 """
     pazy_swept_no_rod_least_squares_stiffness_file(sweep, version; reference_axis, mesh, segments) -> String
 
-Path of the CSV file with the stiffness matrices of the swept wing with `sweep` degrees of sweep, `version`, without the tip rod, fitted by `least_squares_stiffness_matrices` (`segments` = `:nodes`, `:global` or `:ends`) for the given reference axis and mesh, which is nastran/Pazy_Technion/S<sweep>/NoRod/S<sweep>_<version>_norod_RA<x>_stiffness_matrices_<mesh>.csv (see `pazy_mesh_tag`; the version is as in `pazy_swept_name`), and `_global` or `_ends` after it for those `segments` (see `pazy_segments_suffix`).
+Path of the CSV file with the stiffness matrices of the swept wing with `sweep` degrees of sweep, `version`, without the tip rod, fitted by `least_squares_stiffness_matrices` (`segments` = `:nodes` or `:global`) for the given reference axis and mesh, which is nastran/Pazy_Technion/S<sweep>/NoRod/S<sweep>_<version>_norod_RA<x>_stiffness_matrices_<mesh>.csv (see `pazy_mesh_tag`; the version is as in `pazy_swept_name`), and `_global` after it for `segments = :global` (see `pazy_segments_suffix`).
 """
 pazy_swept_no_rod_least_squares_stiffness_file(sweep::Real, version::AbstractString; reference_axis::Real, mesh, segments::Symbol) = joinpath(pazy_swept_no_rod_dir(sweep, version), "$(pazy_swept_no_rod_name(sweep, version))_$(pazy_reference_axis_tag(reference_axis))_stiffness_matrices_$(pazy_mesh_tag(mesh))$(pazy_segments_suffix(segments)).csv")
 
@@ -623,7 +623,7 @@ pazy_no_rod_stiffness_file(; reference_axis::Real) = joinpath(@__DIR__, PAZY_NO_
 """
     pazy_no_rod_least_squares_stiffness_file(; reference_axis, mesh, segments) -> String
 
-Path of the CSV file with the stiffness matrices of the Technion Pazy wing without the tip rod fitted by `least_squares_stiffness_matrices` (see `pazy_least_squares_stiffness_file`), which is nastran/Pazy_Technion/S0_norod/S0_norod_RA<x>_stiffness_matrices_<mesh>.csv (see `pazy_mesh_tag`), and `_global` or `_ends` after it for those `segments` (see `pazy_segments_suffix`).
+Path of the CSV file with the stiffness matrices of the Technion Pazy wing without the tip rod fitted by `least_squares_stiffness_matrices` (see `pazy_least_squares_stiffness_file`), which is nastran/Pazy_Technion/S0_norod/S0_norod_RA<x>_stiffness_matrices_<mesh>.csv (see `pazy_mesh_tag`), and `_global` after it for `segments = :global` (see `pazy_segments_suffix`).
 """
 pazy_no_rod_least_squares_stiffness_file(; reference_axis::Real, mesh, segments::Symbol) = joinpath(@__DIR__, PAZY_NO_ROD_DIR, "$(PAZY_NO_ROD_NAME)_$(pazy_reference_axis_tag(reference_axis))_stiffness_matrices_$(pazy_mesh_tag(mesh))$(pazy_segments_suffix(segments)).csv")
 
