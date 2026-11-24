@@ -498,15 +498,17 @@ Condenses the lumped GFEM masses to the beam nodes `xref` (the reference axis) b
 """
 function condense_to_beam(lumped::Vector{LumpedMass}, xref::Vector{Vector{Float64}}; grids::Dict{Int,Vector{Float64}}, assign_by::Symbol=:span, span_direction=nothing, tensor_about::Symbol=:cg)
     n = length(xref)
-    n >= 1 || throw(ArgumentError("the reference axis needs at least one node"))
-    e = span_direction === nothing ? (n > 1 ? xref[end] - xref[1] : [1.0, 0.0, 0.0]) : Float64.(span_direction)
+    n >= 2 || throw(ArgumentError("the reference axis needs at least two nodes"))
+    e = span_direction === nothing ? 
+        xref[end] - xref[1] : 
+        Float64.(span_direction)
     e = e / norm(e)
     sref = [dot(e, x) for x in xref]
     m = zeros(n)
     mp = [zeros(3) for _ in 1:n]
     J0 = [zeros(3, 3) for _ in 1:n]
     # Beam nodes equidistant (up to round-off) from a grid share its lumped mass equally, instead of the floating-point argmin picking one of them
-    scale = n > 1 ? maximum(norm(x - xref[1]) for x in xref) : 1.0
+    scale = maximum(norm(x - xref[1]) for x in xref)
     tie_tol = 1e-9 * scale
     assignment = Dict{Int,Vector{Int}}()
     for lm in lumped
@@ -533,6 +535,53 @@ function condense_to_beam(lumped::Vector{LumpedMass}, xref::Vector{Vector{Float6
     offsets = [m[k] > 0 ? mp[k] / m[k] - xref[k] : zeros(3) for k in 1:n]
     tensors = [begin
         c = tensor_about == :cg ? xref[k] + offsets[k] : xref[k]
+        J0[k] - transport(m[k], c)
+    end for k in 1:n]
+    return m, offsets, tensors, assignment
+end
+
+"""
+    condense_to_elements(lumped, xref; grids, span_direction=nothing, tensor_about=:cg)
+
+Condenses the lumped GFEM masses to the beam elements between consecutive nodes of the reference axis `xref`, at the midpoints of the elements (where their inertia matrices are defined), instead of to the nodes (see `condense_to_beam`). This method is an alternative to `condense_to_beam`, not currently being used. Each GFEM grid is assigned to the element that contains it in the coordinate along `span_direction` (the default direction goes from the first to the last beam node), i.e., the GFEM is sliced into bins between the beam nodes. The grids beyond the first or last node belong to the first or last element, and those that lie exactly on an interior node (up to round-off) are split equally between its two elements. The offsets (center of mass relative to the midpoint of the element, with its component along the axis) and the inertia tensors are as in `condense_to_beam`. Returns, for each element, the mass, the offset, the tensor, and the grid → element(s) assignment.
+"""
+function condense_to_elements(lumped::Vector{LumpedMass}, xref::Vector{Vector{Float64}}; grids::Dict{Int,Vector{Float64}}, span_direction=nothing, tensor_about::Symbol=:cg)
+    n = length(xref) - 1
+    n >= 1 || throw(ArgumentError("the reference axis needs at least two nodes"))
+    e = span_direction === nothing ? 
+        xref[end] - xref[1] : 
+        Float64.(span_direction)
+    e = e / norm(e)
+    sref = [dot(e, x) for x in xref]
+    xmid = [(xref[k] + xref[k+1]) / 2 for k in 1:n]
+    m = zeros(n)
+    mp = [zeros(3) for _ in 1:n]
+    J0 = [zeros(3, 3) for _ in 1:n]
+    tie_tol = 1e-9 * maximum(norm(x - xref[1]) for x in xref)
+    assignment = Dict{Int,Vector{Int}}()
+    for lm in lumped
+        elements = get!(assignment, lm.grid) do
+            s = dot(e, grids[lm.grid])
+            if s <= sref[1] + tie_tol
+                [1]
+            elseif s >= sref[end] - tie_tol
+                [n]
+            else
+                # Interior node (within the tolerance): both of its elements; otherwise the element that contains the grid
+                onNode = findfirst(sk -> abs(s - sk) <= tie_tol, sref)
+                onNode === nothing ? [searchsortedlast(sref, s)] : [onNode - 1, onNode]
+            end
+        end
+        w = 1 / length(elements)
+        for k in elements
+            m[k] += w * lm.m
+            mp[k] += w * lm.m * lm.p
+            J0[k] += w * (lm.J + transport(lm.m, lm.p))
+        end
+    end
+    offsets = [m[k] > 0 ? mp[k] / m[k] - xmid[k] : zeros(3) for k in 1:n]
+    tensors = [begin
+        c = tensor_about == :cg ? xmid[k] + offsets[k] : xmid[k]
         J0[k] - transport(m[k], c)
     end for k in 1:n]
     return m, offsets, tensors, assignment
@@ -602,11 +651,11 @@ end
 """
     beam_mass_model(bdf, xref; shell_lumping=:rowsum, solid_lumping=:rowsum, beam_axis_offsets=true, beam_torsional_inertia=true, assign_by=:span, span_direction=nothing, tensor_about=:cg, f06=nothing, outdir=nothing, tag="beam", verbose=true)
 
-Equivalent beam mass model of the GFEM in the Nastran input file `bdf`, condensed to the beam nodes `xref` of the user-specified reference axis (a vector of 3-vectors, see `straight_axis`; for simple prismatic models it is the elastic axis, coincident with the shear center). The reference axis is expressed in the basic coordinate system of the GFEM, in which the offsets and inertia tensors are reported. If the Nastran output `f06` is given, the lumped GFEM is validated against its Grid Point Weight Generator output. If `outdir` is given, the mass, offset and tensor files are written to it, with names ending in `tag`. The CBEAM and CBAR elements with properties in `exclude_beam_pids` and the CONM2 elements with ids in `exclude_conm2` are left out of the model. The remaining keywords are described in `lump_gfem` and `condense_to_beam`.
+Equivalent beam mass model of the GFEM in the Nastran input file `bdf`, condensed to the beam nodes `xref` of the user-specified reference axis (a vector of 3-vectors, see `straight_axis`; for simple prismatic models it is the elastic axis, coincident with the shear center). The reference axis is expressed in the basic coordinate system of the GFEM, in which the offsets and inertia tensors are reported. If the Nastran output `f06` is given, the lumped GFEM is validated against its Grid Point Weight Generator output. If `outdir` is given, the mass, offset and tensor files are written to it, with names ending in `tag`. The CBEAM and CBAR elements with properties in `exclude_beam_pids` and the CONM2 elements with ids in `exclude_conm2` are left out of the model. With `to_elements=true` the masses are condensed to the midpoints of the elements between the nodes (see `condense_to_elements`, `assign_by` is not used), and `m`, `offsets` and `tensors` have one entry per element. The remaining keywords are described in `lump_gfem` and `condense_to_beam`.
 
 Returns a named tuple with the masses `m`, offsets `offsets` (center of mass relative to the beam node), inertia tensors `tensors`, grid → node(s) `assignment`, `xref`, `gfem`, `lumped` masses and the rigid-body properties `total_mass`, `cg` and `J0` (about the origin) of the lumped GFEM.
 """
-function beam_mass_model(bdf::AbstractString, xref::AbstractVector; shell_lumping::Symbol=:rowsum, solid_lumping::Symbol=:rowsum, beam_axis_offsets::Bool=true, beam_torsional_inertia::Bool=true, assign_by::Symbol=:span, span_direction=nothing, tensor_about::Symbol=:cg, f06=nothing, outdir=nothing, tag::AbstractString="beam", verbose::Bool=true, exclude_beam_pids=(), exclude_conm2=())
+function beam_mass_model(bdf::AbstractString, xref::AbstractVector; shell_lumping::Symbol=:rowsum, solid_lumping::Symbol=:rowsum, beam_axis_offsets::Bool=true, beam_torsional_inertia::Bool=true, assign_by::Symbol=:span, span_direction=nothing, tensor_about::Symbol=:cg, to_elements::Bool=false, f06=nothing, outdir=nothing, tag::AbstractString="beam", verbose::Bool=true, exclude_beam_pids=(), exclude_conm2=())
     xref = [Float64.(x) for x in xref]
     gfem = read_gfem(bdf)
     # Elements left out of the mass model (e.g. a tip rod and its tip masses): CBEAM and CBAR elements of the properties `exclude_beam_pids` and CONM2 elements with the ids `exclude_conm2`
@@ -623,7 +672,11 @@ function beam_mass_model(bdf::AbstractString, xref::AbstractVector; shell_lumpin
             @printf("GFEM lumped mass %.7e kg (GPWG %.7e), CG error %.2e m, inertia error %.2e (relative)\n", total_mass, gpwg[1], norm(cg - gpwg[2]), norm(J0 - gpwg[3]) / norm(gpwg[3]))
         end
     end
-    m, offsets, tensors, assignment = condense_to_beam(lumped, xref; grids=gfem.grids, assign_by, span_direction, tensor_about)
+    m, offsets, tensors, assignment = if to_elements
+        condense_to_elements(lumped, xref; grids=gfem.grids, span_direction, tensor_about)
+    else
+        condense_to_beam(lumped, xref; grids=gfem.grids, assign_by, span_direction, tensor_about)
+    end
     outdir === nothing || write_beam_mass_model(outdir, tag, m, offsets, tensors)
     return (; m, offsets, tensors, assignment, xref, gfem, lumped, total_mass, cg, J0)
 end
