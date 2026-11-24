@@ -182,7 +182,7 @@ Without `Cmin` the constraint is usually active along the transverse shear direc
 
 # Keyword arguments
 - `y` = coordinates of the nodes along the beam axis (x1-direction), increasing from the clamped node `y[1]`
-- `T` = vector with the (6 x 6) generalized displacements of each node, rows [u; θ] and columns [F1, F2, F3, M1, M2, M3]; the clamped node has zeros and is not used
+- `T` = array with the (6 x 6) generalized displacements of each node, rows [u; θ] and columns [F1, F2, F3, M1, M2, M3]; the clamped node has zeros and is not used
 - `breaks=y` = coordinates of the ends of the segments, increasing, from `y[1]` to `y[end]`: one stiffness matrix for each of the `length(breaks) - 1` segments. With `breaks = y` there is one for each segment between nodes, and with `breaks = [y[1], y[end]]` a single one for the whole beam, fitted to all the nodes
 - `y_load=y[end]` = coordinate of the point where the loads are applied
 - `Cmin=nothing` = lower bound of the compliance of every segment (6 x 6 symmetric positive semidefinite matrix, or vector with its diagonal), see above. Default: zeros
@@ -215,11 +215,17 @@ function least_squares_stiffness_matrices(; y, T, breaks=y, y_load=y[end], Cmin=
     jref > 1 || throw(ArgumentError("no node between the clamped node and the load point"))
     Dref = D[jref]
     any(iszero, diag(Dref)) && throw(ArgumentError("the direct generalized displacements of node $jref must be non-zero"))
-    W = weights === nothing ? 1 ./ sqrt.(abs.(diag(Dref) * diag(Dref)')) : Matrix{Float64}(weights)
+    W = weights === nothing ? 
+        1 ./ sqrt.(abs.(diag(Dref) * diag(Dref)')) : 
+        Matrix{Float64}(weights)
     size(W) == (6, 6) || throw(ArgumentError("weights must be a 6 x 6 matrix"))
 
     # Lower bound of the compliance
-    Cmin = Cmin === nothing ? zeros(6, 6) : Cmin isa AbstractVector ? Matrix(Diagonal(Float64.(Cmin))) : Matrix{Float64}(Cmin)
+    Cmin = Cmin === nothing ? 
+           zeros(6, 6) : 
+           Cmin isa AbstractVector ? 
+           Matrix(Diagonal(Float64.(Cmin))) : 
+           Matrix{Float64}(Cmin)
     size(Cmin) == (6, 6) && issymmetric(Cmin) && eigmin(Symmetric(Cmin)) >= -eps() * max(1, opnorm(Cmin)) || throw(ArgumentError("Cmin must be a symmetric positive semidefinite 6 x 6 matrix"))
 
     # Scaling of the unknowns, C = Λ C̃ Λ
@@ -230,6 +236,7 @@ function least_squares_stiffness_matrices(; y, T, breaks=y, y_load=y[end], Cmin=
     C̃min = Matrix(Symmetric(inv(Λ) * Cmin * inv(Λ)))
 
     # Symmetric basis of the 21 unknowns of each segment
+    # TODO: the gradient step is taken in the (Euclidean) metric of these unknowns, where each off-diagonal entry counts once, whereas the projection below (by eigenvalues) is a projection in the Frobenius norm, where it counts twice. The two metrics only agree if the basis is orthonormal in the Frobenius norm, i.e. with the off-diagonal entries of the basis matrices equal to 1/sqrt(2) (and `tomat` and `tovec` scaled accordingly). With active constraints (e.g. the shear stiffness bound Cmin) the solution is then not exactly the constrained minimizer. Tested on the Technion Pazy S0 (nodes and global, nominal and refined meshes): the residual changes only from the 9th digit, the stiffness matrices of the :nodes segments by up to 0.2-2%, and the modal frequencies of S0BeamRodModal.jl not at all, so it was not adopted
     IJ = [(i, j) for j in 1:6 for i in 1:j]
     basis = map(IJ) do (i, j)
         B = zeros(6, 6); B[i, j] = B[j, i] = 1; Λ * B * Λ
